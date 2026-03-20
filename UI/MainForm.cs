@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
@@ -35,6 +36,7 @@ public sealed class MainForm : Form
     private readonly Button _generalTabButton = new() { Text = "Allgemein", AutoSize = true };
     private readonly Button _secretsTabButton = new() { Text = "Secrets", AutoSize = true };
     private readonly Button _clipboardTabButton = new() { Text = "Clipboard", AutoSize = true };
+    private readonly Button _aboutButton = new() { Text = "?", Width = 34, Height = 34 };
     private readonly Button _insertUsernameButton = new() { Text = "USERNAME", Width = 126, Height = 78 };
     private readonly Button _insertSecretButton = new() { Text = "SECRET", Width = 126, Height = 78 };
     private readonly Button _insertTotpButton = new() { Text = "TOTP", Width = 126, Height = 78 };
@@ -84,6 +86,7 @@ public sealed class MainForm : Form
         _generalTabButton.Click += (_, _) => ShowPage(_generalPage);
         _secretsTabButton.Click += (_, _) => ShowPage(_secretsPage);
         _clipboardTabButton.Click += (_, _) => ShowPage(_clipboardPage);
+        _aboutButton.Click += (_, _) => ShowAboutDialog();
         _setPatternButton.Click += (_, _) => SetUnlockPatternRequested?.Invoke(this, EventArgs.Empty);
         _insertUsernameButton.Click += (_, _) => TriggerInsertField(SecretFieldKind.Username);
         _insertSecretButton.Click += (_, _) => TriggerInsertField(SecretFieldKind.Secret);
@@ -93,16 +96,28 @@ public sealed class MainForm : Form
         ConfigureGrids();
         BuildPages();
 
-        var topPanel = new FlowLayoutPanel
+        var lockPanel = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            BackColor = _backgroundColor,
+            Margin = Padding.Empty
+        };
+        lockPanel.Controls.Add(_lockStatusLabel);
+        lockPanel.Controls.Add(_unlockButton);
+        lockPanel.Controls.Add(_lockButton);
+
+        var topPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             AutoSize = true,
+            ColumnCount = 2,
             Padding = new Padding(12, 12, 12, 0),
             BackColor = _backgroundColor
         };
-        topPanel.Controls.Add(_lockStatusLabel);
-        topPanel.Controls.Add(_unlockButton);
-        topPanel.Controls.Add(_lockButton);
+        topPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        topPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        topPanel.Controls.Add(lockPanel, 0, 0);
+        topPanel.Controls.Add(_aboutButton, 1, 0);
 
         var tabsPanel = new FlowLayoutPanel
         {
@@ -582,6 +597,9 @@ public sealed class MainForm : Form
             button.Width = Math.Max(buttonWidth, button.PreferredSize.Width + 18);
         }
 
+        _aboutButton.Size = enabled ? new Size(42, 42) : new Size(34, 34);
+        _aboutButton.Font = new Font(Font.FontFamily, enabled ? 12f : 10f, FontStyle.Bold);
+
         _secretGrid.RowTemplate.Height = rowHeight;
         _clipboardGrid.RowTemplate.Height = rowHeight;
         _secretGrid.DefaultCellStyle.Font = font;
@@ -593,6 +611,13 @@ public sealed class MainForm : Form
 
     private void ConfigureInsertButtons()
     {
+        _aboutButton.FlatStyle = FlatStyle.Flat;
+        _aboutButton.FlatAppearance.BorderSize = 1;
+        _aboutButton.FlatAppearance.BorderColor = _accentColor;
+        _aboutButton.BackColor = _panelColor;
+        _aboutButton.ForeColor = _textColor;
+        _aboutButton.TextAlign = ContentAlignment.MiddleCenter;
+
         ConfigureInsertButton(_insertUsernameButton, CreateUserIcon(28, _accentColor), "USERNAME");
         ConfigureInsertButton(_insertSecretButton, CreateLockIcon(28, _accentColor), "SECRET");
         ConfigureInsertButton(_insertTotpButton, CreateTotpIcon(28, _accentColor), "TOTP");
@@ -778,6 +803,146 @@ public sealed class MainForm : Form
         DwmSetWindowAttribute(Handle, borderColor, ref border, sizeof(uint));
         DwmSetWindowAttribute(Handle, captionColor, ref caption, sizeof(uint));
         DwmSetWindowAttribute(Handle, textColor, ref text, sizeof(uint));
+    }
+
+    private void ShowAboutDialog()
+    {
+        var restoreTopMost = _topMostCheckBox.Checked;
+        if (restoreTopMost)
+        {
+            _topMostCheckBox.Checked = false;
+            TopMost = false;
+        }
+
+        using var dialog = new Form
+        {
+            Text = "Über PassTypePro",
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            ShowInTaskbar = false,
+            ClientSize = new Size(360, 220),
+            BackColor = _backgroundColor,
+            ForeColor = _textColor
+        };
+
+        var titleLabel = new Label
+        {
+            Text = "PassTypePro",
+            AutoSize = true,
+            Font = new Font(Font.FontFamily, 14f, FontStyle.Bold),
+            ForeColor = _textColor,
+            BackColor = Color.Transparent
+        };
+
+        var versionLabel = new Label
+        {
+            Text = "Version: v0.1.0",
+            AutoSize = true,
+            ForeColor = _textColor,
+            BackColor = Color.Transparent
+        };
+
+        var authorLabel = new Label
+        {
+            Text = "Autor: Steven Schödel",
+            AutoSize = true,
+            ForeColor = _textColor,
+            BackColor = Color.Transparent
+        };
+
+        var licenseLink = new LinkLabel
+        {
+            Text = "Lizenz: MIT",
+            AutoSize = true,
+            LinkColor = _accentColor,
+            ActiveLinkColor = Color.FromArgb(128, 195, 255),
+            VisitedLinkColor = _accentColor,
+            BackColor = Color.Transparent
+        };
+        licenseLink.Click += (_, _) =>
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "https://opensource.org/license/MIT",
+                UseShellExecute = true
+            });
+        };
+
+        var urlLabel = new Label
+        {
+            Text = "https://opensource.org/license/MIT",
+            AutoSize = true,
+            ForeColor = _mutedTextColor,
+            BackColor = Color.Transparent
+        };
+
+        var okButton = new Button
+        {
+            Text = "OK",
+            DialogResult = DialogResult.OK,
+            AutoSize = true,
+            BackColor = _panelColor,
+            ForeColor = _textColor,
+            FlatStyle = FlatStyle.Flat
+        };
+        okButton.FlatAppearance.BorderColor = _accentColor;
+
+        var content = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(20),
+            BackColor = _backgroundColor,
+            ColumnCount = 1,
+            RowCount = 6
+        };
+        content.Controls.Add(titleLabel, 0, 0);
+        content.Controls.Add(versionLabel, 0, 1);
+        content.Controls.Add(authorLabel, 0, 2);
+        content.Controls.Add(licenseLink, 0, 3);
+        content.Controls.Add(urlLabel, 0, 4);
+        content.Controls.Add(okButton, 0, 5);
+
+        dialog.AcceptButton = okButton;
+        dialog.Controls.Add(content);
+        dialog.Shown += (_, _) => ApplyDialogDarkMode(dialog);
+
+        try
+        {
+            dialog.ShowDialog(this);
+        }
+        finally
+        {
+            if (restoreTopMost)
+            {
+                _topMostCheckBox.Checked = true;
+                TopMost = true;
+            }
+        }
+    }
+
+    private void ApplyDialogDarkMode(Form dialog)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        const int useImmersiveDarkMode = 20;
+        const int borderColor = 34;
+        const int captionColor = 35;
+        const int textColor = 36;
+
+        var enabled = 1;
+        var border = ToColorRef(_panelColor);
+        var caption = ToColorRef(_backgroundColor);
+        var text = ToColorRef(_textColor);
+
+        DwmSetWindowAttribute(dialog.Handle, useImmersiveDarkMode, ref enabled, sizeof(int));
+        DwmSetWindowAttribute(dialog.Handle, borderColor, ref border, sizeof(uint));
+        DwmSetWindowAttribute(dialog.Handle, captionColor, ref caption, sizeof(uint));
+        DwmSetWindowAttribute(dialog.Handle, textColor, ref text, sizeof(uint));
     }
 
     private static uint ToColorRef(Color color)
