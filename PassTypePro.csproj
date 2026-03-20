@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>PassTypePro</RootNamespace>
+    <AssemblyName>PassTypePro</AssemblyName>
+    <ApplicationIcon>Assets\passtypepro-lock-dark.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="Assets\passtypepro-lock-dark.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>Assets\passtypepro-lock-dark.ico</Link>
+    </Content>
+  </ItemGroup>
+</Project>
