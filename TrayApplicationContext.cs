@@ -184,6 +184,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _appLockService.Touch();
             await Task.Delay(Math.Max(0, entry.StartDelayMs));
             await _typingSequenceService.TypeEntryAsync(entry);
+            MarkSecretAsUsed(entry);
         }
         catch (Exception ex)
         {
@@ -289,6 +290,7 @@ public sealed class TrayApplicationContext : ApplicationContext
             _mainForm.FormClosed += (_, _) => _mainForm = null;
             _mainForm.AddSecretRequested += (_, _) => AddSecret();
             _mainForm.SetPrimarySecretRequested += secret => SetPrimarySecret(secret);
+            _mainForm.ToggleFavoriteRequested += secret => ToggleFavorite(secret);
             _mainForm.EditSecretRequested += secret => EditSecret(secret);
             _mainForm.DeleteSecretRequested += secret => DeleteSecret(secret);
             _mainForm.DeleteSecretsRequested += secrets => DeleteSecrets(secrets);
@@ -403,6 +405,13 @@ public sealed class TrayApplicationContext : ApplicationContext
         var existing = _secrets.First(entry => entry.Id == secret.Id);
         existing.IsPrimary = true;
         ApplyPrimarySecretSelection(existing);
+        PersistSecrets();
+    }
+
+    private void ToggleFavorite(SecretEntry secret)
+    {
+        var existing = _secrets.First(entry => entry.Id == secret.Id);
+        existing.IsFavorite = !existing.IsFavorite;
         PersistSecrets();
     }
 
@@ -575,21 +584,36 @@ public sealed class TrayApplicationContext : ApplicationContext
                 if (!string.IsNullOrWhiteSpace(secret.Username))
                 {
                     await _keyboardInjectionService.TypeTextAsync(secret.Username, 0, secret.KeystrokeDelayMs);
+                    MarkSecretAsUsed(secret);
                 }
 
                 break;
             case SecretFieldKind.Secret:
                 await _keyboardInjectionService.TypeTextAsync(secret.Value, 0, secret.KeystrokeDelayMs);
+                MarkSecretAsUsed(secret);
                 break;
             case SecretFieldKind.Totp:
                 if (!string.IsNullOrWhiteSpace(secret.TotpSeed))
                 {
                     var code = _totpService.GenerateCode(secret.TotpSeed);
                     await _keyboardInjectionService.TypeTextAsync(code, 0, secret.KeystrokeDelayMs);
+                    MarkSecretAsUsed(secret);
                 }
 
                 break;
         }
+    }
+
+    private void MarkSecretAsUsed(SecretEntry secret)
+    {
+        var existing = _secrets.FirstOrDefault(entry => entry.Id == secret.Id);
+        if (existing is null)
+        {
+            return;
+        }
+
+        existing.LastUsedAt = DateTimeOffset.Now;
+        PersistSecrets();
     }
 
     private void ExportSecrets()

@@ -16,6 +16,8 @@ public sealed class SecretEntry
     public int StartDelayMs { get; set; } = 150;
     public int KeystrokeDelayMs { get; set; } = 0;
     public bool IsPrimary { get; set; }
+    public bool IsFavorite { get; set; }
+    public DateTimeOffset? LastUsedAt { get; set; }
 
     public string EntryType
     {
@@ -44,6 +46,11 @@ public sealed class SecretEntry
     public override string ToString()
     {
         var label = IsPrimary ? $"{Name} (Primary)" : Name;
+
+        if (IsFavorite)
+        {
+            label = "★ " + label;
+        }
 
         if (!string.IsNullOrWhiteSpace(SecretHotkey))
         {

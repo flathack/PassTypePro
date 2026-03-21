@@ -28,11 +28,20 @@ public sealed class MainForm : Form
     private readonly NumericUpDown _autoLockMinutesNumeric = new() { Minimum = 0, Maximum = 240, Width = 80 };
     private readonly TextBox _newPinTextBox = new() { Width = 180, UseSystemPasswordChar = true };
     private readonly TextBox _secretSearchTextBox = new() { Width = 260 };
+    private readonly TreeView _groupTreeView = new() { Dock = DockStyle.Fill, HideSelection = false, BorderStyle = BorderStyle.None, DrawMode = TreeViewDrawMode.OwnerDrawAll, FullRowSelect = true, ShowLines = false, ShowPlusMinus = false, BackColor = Color.FromArgb(29, 35, 41), ForeColor = Color.FromArgb(231, 237, 243) };
     private readonly DataGridView _secretGrid = new() { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false, MultiSelect = true, SelectionMode = DataGridViewSelectionMode.FullRowSelect, RowHeadersVisible = false, AutoGenerateColumns = false, BackgroundColor = Color.FromArgb(29, 35, 41), BorderStyle = BorderStyle.None };
     private readonly DataGridView _clipboardGrid = new() { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false, MultiSelect = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, RowHeadersVisible = false, AutoGenerateColumns = false, BackgroundColor = Color.FromArgb(29, 35, 41), BorderStyle = BorderStyle.None };
     private readonly Label _lockStatusLabel = new() { AutoSize = true };
     private readonly Label _totpPreviewLabel = new() { AutoSize = true };
     private readonly Label _secretCountLabel = new() { AutoSize = true };
+    private readonly Label _detailNameLabel = new() { AutoSize = true };
+    private readonly Label _detailMetaLabel = new() { AutoSize = true };
+    private readonly Label _detailUsernameLabel = new() { AutoSize = true };
+    private readonly Label _detailUrlLabel = new() { AutoSize = true };
+    private readonly Label _detailSourceLabel = new() { AutoSize = true };
+    private readonly Label _detailLastUsedLabel = new() { AutoSize = true };
+    private readonly Label _detailNotesLabel = new() { AutoSize = true, MaximumSize = new Size(260, 0) };
+    private readonly Button _favoriteButton = new() { Text = "★", Width = 42, Height = 34 };
     private readonly Button _unlockButton = new() { Width = 42, Height = 34 };
     private readonly Button _lockButton = new() { Width = 42, Height = 34 };
     private readonly Button _topMostButton = new() { Width = 42, Height = 34 };
@@ -86,6 +95,7 @@ public sealed class MainForm : Form
 
     public event EventHandler? AddSecretRequested;
     public event Action<SecretEntry>? SetPrimarySecretRequested;
+    public event Action<SecretEntry>? ToggleFavoriteRequested;
     public event Action<SecretEntry>? EditSecretRequested;
     public event Action<SecretEntry>? DeleteSecretRequested;
     public event Action<IReadOnlyList<SecretEntry>>? DeleteSecretsRequested;
@@ -104,7 +114,7 @@ public sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "PassTypePro v0.2.2";
+        Text = "PassTypePro v0.2.3";
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
@@ -140,8 +150,17 @@ public sealed class MainForm : Form
                 TypeSecretRequested?.Invoke(secret);
             }
         };
+        _favoriteButton.Click += (_, _) =>
+        {
+            var secret = GetSelectedSecret();
+            if (secret is not null)
+            {
+                ToggleFavoriteRequested?.Invoke(secret);
+            }
+        };
         _unlockSubmitButton.Click += (_, _) => UnlockSubmitRequested?.Invoke(this, EventArgs.Empty);
         _secretSearchTextBox.TextChanged += (_, _) => ApplySecretFilter(GetSelectedSecret()?.Id);
+        _groupTreeView.AfterSelect += (_, _) => ApplySecretFilter(GetSelectedSecret()?.Id);
         _unlockPinTextBox.KeyDown += (_, args) =>
         {
             if (args.KeyCode == Keys.Enter)
@@ -184,6 +203,22 @@ public sealed class MainForm : Form
             }
         };
         _dockSearchTextBox.TextChanged += (_, _) => ApplyDockFilter(GetSelectedDockSecret()?.Id, GetSelectedDockClipboardEntry()?.CapturedAt);
+        _groupTreeView.DrawNode += (_, args) =>
+        {
+            if (args.Node is null)
+            {
+                return;
+            }
+
+            var isSelected = (args.State & TreeNodeStates.Selected) == TreeNodeStates.Selected;
+            using var backgroundBrush = new SolidBrush(isSelected ? _selectionColor : _surfaceColor);
+            using var textBrush = new SolidBrush(_textColor);
+            var nodeFont = args.Node.NodeFont ?? args.Node.TreeView?.Font ?? Font;
+            var fullBounds = new Rectangle(0, args.Bounds.Top, args.Node.TreeView?.ClientSize.Width ?? args.Bounds.Width, args.Bounds.Height);
+            args.Graphics.FillRectangle(backgroundBrush, fullBounds);
+            var textBounds = new Rectangle(args.Bounds.Left, args.Bounds.Top, Math.Max(0, fullBounds.Width - args.Bounds.Left), args.Bounds.Height);
+            TextRenderer.DrawText(args.Graphics, args.Node.Text, nodeFont, textBounds, textBrush.Color, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
+        };
         _secretGrid.CellDoubleClick += (_, _) =>
         {
             var selectedSecrets = GetSelectedSecrets();
@@ -283,6 +318,7 @@ public sealed class MainForm : Form
 
         _allSecrets = secrets.ToList();
         _currentClipboardEntries = clipboardEntries.ToList();
+        BuildGroupTree();
         _clipboardGrid.DataSource = null;
         _clipboardGrid.DataSource = _currentClipboardEntries
             .Select(entry => new ClipboardEntry(Shorten(entry.Content), entry.CapturedAt))
@@ -361,6 +397,7 @@ public sealed class MainForm : Form
         {
             UpdateTotpPreview();
             UpdateInsertAvailability();
+            UpdateDetailCard();
         };
 
         _secretGrid.Columns.Add(new DataGridViewTextBoxColumn
@@ -375,14 +412,7 @@ public sealed class MainForm : Form
             HeaderText = "Benutzer",
             DataPropertyName = nameof(SecretEntry.Username),
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-            FillWeight = 30
-        });
-        _secretGrid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            HeaderText = "Gruppe",
-            DataPropertyName = nameof(SecretEntry.GroupPath),
-            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-            FillWeight = 26
+            FillWeight = 44
         });
         _secretGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
@@ -539,6 +569,7 @@ public sealed class MainForm : Form
     {
         var addButton = new Button { Text = "Neu", AutoSize = true };
         var setPrimaryButton = new Button { Text = "Standard", AutoSize = true };
+        var favoriteButton = new Button { Text = "Favorit", AutoSize = true };
         var editButton = new Button { Text = "Edit", AutoSize = true };
         var deleteButton = new Button { Text = "X", AutoSize = true };
         var importKeePassButton = new Button { Text = "KeePass", AutoSize = true };
@@ -549,6 +580,14 @@ public sealed class MainForm : Form
             if (selectedSecrets.Count == 1)
             {
                 SetPrimarySecretRequested?.Invoke(selectedSecrets[0]);
+            }
+        };
+        favoriteButton.Click += (_, _) =>
+        {
+            var selectedSecrets = GetSelectedSecrets();
+            if (selectedSecrets.Count == 1)
+            {
+                ToggleFavoriteRequested?.Invoke(selectedSecrets[0]);
             }
         };
         editButton.Click += (_, _) =>
@@ -582,6 +621,7 @@ public sealed class MainForm : Form
         };
         buttonPanel.Controls.Add(addButton);
         buttonPanel.Controls.Add(setPrimaryButton);
+        buttonPanel.Controls.Add(favoriteButton);
         buttonPanel.Controls.Add(editButton);
         buttonPanel.Controls.Add(deleteButton);
         buttonPanel.Controls.Add(importKeePassButton);
@@ -603,44 +643,67 @@ public sealed class MainForm : Form
         searchPanel.Controls.Add(_secretSearchTextBox, 1, 0);
         searchPanel.Controls.Add(_secretCountLabel, 2, 0);
 
-        var detailsPanel = new FlowLayoutPanel
+        var leftHeader = new Label
+        {
+            Text = "Filter",
+            AutoSize = true,
+            Font = new Font(Font, FontStyle.Bold),
+            Margin = new Padding(0, 0, 0, 8)
+        };
+
+        var leftPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12), BackColor = _backgroundColor };
+        leftPanel.Controls.Add(_groupTreeView);
+        leftPanel.Controls.Add(new Panel
         {
             Dock = DockStyle.Top,
-            AutoSize = true,
-            Padding = new Padding(0, 8, 0, 8),
-            BackColor = _backgroundColor
-        };
-        detailsPanel.Controls.Add(new Label { Text = "Aktueller TOTP:", AutoSize = true });
-        detailsPanel.Controls.Add(_totpPreviewLabel);
+            Height = 30,
+            BackColor = _backgroundColor,
+            Controls = { leftHeader }
+        });
 
-        var insertPanel = new TableLayoutPanel
+        var centerPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12), BackColor = _backgroundColor };
+        centerPanel.Controls.Add(_secretGrid);
+        centerPanel.Controls.Add(searchPanel);
+        centerPanel.Controls.Add(buttonPanel);
+
+        var actionButtons = new TableLayoutPanel
         {
             Dock = DockStyle.Bottom,
-            AutoSize = false,
-            Height = 86,
+            Height = 94,
             ColumnCount = 4,
-            Padding = new Padding(0, 14, 0, 0),
+            BackColor = _backgroundColor,
+            Padding = new Padding(0, 10, 0, 0)
+        };
+        for (var i = 0; i < 4; i++)
+        {
+            actionButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+        }
+        actionButtons.Controls.Add(_insertUsernameButton, 0, 0);
+        actionButtons.Controls.Add(_insertSecretButton, 1, 0);
+        actionButtons.Controls.Add(_insertTotpButton, 2, 0);
+        actionButtons.Controls.Add(_insertSequenceButton, 3, 0);
+
+        _insertUsernameButton.Text = "USR";
+        _insertSecretButton.Text = "PW";
+        _insertTotpButton.Text = "TOTP";
+        _insertSequenceButton.Text = "SEQ";
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
             BackColor = _backgroundColor
         };
-        insertPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
-        insertPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
-        insertPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
-        insertPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
-        insertPanel.Controls.Add(_insertUsernameButton, 0, 0);
-        insertPanel.Controls.Add(_insertSecretButton, 1, 0);
-        insertPanel.Controls.Add(_insertTotpButton, 2, 0);
-        insertPanel.Controls.Add(_insertSequenceButton, 3, 0);
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220f));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        layout.Controls.Add(leftPanel, 0, 0);
+        layout.Controls.Add(centerPanel, 1, 0);
 
-        var panel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12), BackColor = _backgroundColor };
-        panel.Controls.Add(_secretGrid);
-        panel.Controls.Add(detailsPanel);
-        panel.Controls.Add(searchPanel);
-        panel.Controls.Add(buttonPanel);
-        panel.Controls.Add(insertPanel);
+        centerPanel.Controls.Add(actionButtons);
 
         _secretsPage.Controls.Clear();
         _secretsPage.BackColor = _backgroundColor;
-        _secretsPage.Controls.Add(panel);
+        _secretsPage.Controls.Add(layout);
     }
 
     private void BuildClipboardPage()
@@ -849,6 +912,12 @@ public sealed class MainForm : Form
                     listBox.BackColor = _surfaceColor;
                     listBox.ForeColor = _textColor;
                     break;
+                case TreeView treeView:
+                    treeView.BackColor = _surfaceColor;
+                    treeView.ForeColor = _textColor;
+                    treeView.LineColor = _panelColor;
+                    treeView.BorderStyle = BorderStyle.None;
+                    break;
                 case NumericUpDown numericUpDown:
                     numericUpDown.BackColor = _surfaceColor;
                     numericUpDown.ForeColor = _textColor;
@@ -969,8 +1038,8 @@ public sealed class MainForm : Form
         _aboutButton.ForeColor = _textColor;
         _aboutButton.TextAlign = ContentAlignment.MiddleCenter;
 
-        ConfigureInsertButton(_insertUsernameButton, CreateUserIcon(28, _accentColor), "USERNAME");
-        ConfigureInsertButton(_insertSecretButton, CreateLockIcon(28, _accentColor), "SECRET");
+        ConfigureInsertButton(_insertUsernameButton, CreateUserIcon(28, _accentColor), "USR");
+        ConfigureInsertButton(_insertSecretButton, CreateLockIcon(28, _accentColor), "PW");
         ConfigureInsertButton(_insertTotpButton, CreateTotpIcon(28, _accentColor), "TOTP");
         ConfigureInsertButton(_insertSequenceButton, CreateArrowIcon(28, _accentColor, right: true), "SEQ");
     }
@@ -1455,9 +1524,17 @@ public sealed class MainForm : Form
     private void ApplySecretFilter(Guid? selectedSecretId = null)
     {
         var search = _secretSearchTextBox.Text.Trim();
-        _currentSecrets = string.IsNullOrWhiteSpace(search)
-            ? _allSecrets.ToList()
-            : _allSecrets.Where(secret => MatchesSecretSearch(secret, search)).ToList();
+        var filtered = _allSecrets.Where(MatchesSelectedGroupFilter);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            filtered = filtered.Where(secret => MatchesSecretSearch(secret, search));
+        }
+
+        _currentSecrets = filtered
+            .OrderByDescending(secret => secret.IsFavorite)
+            .ThenByDescending(secret => secret.LastUsedAt ?? DateTimeOffset.MinValue)
+            .ThenBy(secret => secret.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         _secretGrid.DataSource = null;
         _secretGrid.DataSource = _currentSecrets;
@@ -1469,6 +1546,7 @@ public sealed class MainForm : Form
         UpdateInsertAvailability();
         UpdateTotpPreview();
         UpdateSecretCount();
+        UpdateDetailCard();
     }
 
     private static bool MatchesSecretSearch(SecretEntry secret, string search)
@@ -1486,6 +1564,130 @@ public sealed class MainForm : Form
     {
         _secretCountLabel.Text = $"{_currentSecrets.Count} / {_allSecrets.Count} Eintraege";
         _secretCountLabel.ForeColor = _mutedTextColor;
+    }
+
+    private void BuildGroupTree()
+    {
+        var selectedKey = _groupTreeView.SelectedNode?.Tag as string;
+        _groupTreeView.BeginUpdate();
+        _groupTreeView.Nodes.Clear();
+
+        var allNode = new TreeNode("Alle") { Tag = "all" };
+        var favoritesNode = new TreeNode("Favoriten") { Tag = "favorites" };
+        var recentNode = new TreeNode("Zuletzt") { Tag = "recent" };
+        var groupsNode = new TreeNode("Gruppen") { Tag = "groups_root" };
+
+        foreach (var group in _allSecrets
+                     .Select(secret => secret.GroupPath)
+                     .Where(group => !string.IsNullOrWhiteSpace(group))
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(group => group, StringComparer.OrdinalIgnoreCase))
+        {
+            AddGroupNode(groupsNode, group);
+        }
+
+        _groupTreeView.Nodes.Add(allNode);
+        _groupTreeView.Nodes.Add(favoritesNode);
+        _groupTreeView.Nodes.Add(recentNode);
+        if (groupsNode.Nodes.Count > 0)
+        {
+            groupsNode.Expand();
+            _groupTreeView.Nodes.Add(groupsNode);
+        }
+
+        var nodeToSelect = FindNodeByTag(_groupTreeView.Nodes, selectedKey) ?? allNode;
+        _groupTreeView.SelectedNode = nodeToSelect;
+        nodeToSelect.EnsureVisible();
+        _groupTreeView.EndUpdate();
+    }
+
+    private static void AddGroupNode(TreeNode rootNode, string groupPath)
+    {
+        var currentNode = rootNode;
+        var currentPath = string.Empty;
+        foreach (var part in groupPath.Split('/', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            currentPath = string.IsNullOrWhiteSpace(currentPath) ? part : $"{currentPath} / {part}";
+            var nextNode = currentNode.Nodes.Cast<TreeNode>().FirstOrDefault(node => string.Equals(node.Text, part, StringComparison.OrdinalIgnoreCase));
+            if (nextNode is null)
+            {
+                nextNode = new TreeNode(part) { Tag = $"group:{currentPath}" };
+                currentNode.Nodes.Add(nextNode);
+            }
+
+            currentNode = nextNode;
+        }
+    }
+
+    private static TreeNode? FindNodeByTag(TreeNodeCollection nodes, string? tag)
+    {
+        foreach (TreeNode node in nodes)
+        {
+            if (string.Equals(node.Tag as string, tag, StringComparison.Ordinal))
+            {
+                return node;
+            }
+
+            var child = FindNodeByTag(node.Nodes, tag);
+            if (child is not null)
+            {
+                return child;
+            }
+        }
+
+        return null;
+    }
+
+    private bool MatchesSelectedGroupFilter(SecretEntry secret)
+    {
+        var selectedKey = _groupTreeView.SelectedNode?.Tag as string;
+        return selectedKey switch
+        {
+            null or "all" or "groups_root" => true,
+            "favorites" => secret.IsFavorite,
+            "recent" => secret.LastUsedAt.HasValue,
+            _ when selectedKey.StartsWith("group:", StringComparison.Ordinal) =>
+                secret.GroupPath.StartsWith(selectedKey["group:".Length..], StringComparison.OrdinalIgnoreCase),
+            _ => true
+        };
+    }
+
+    private void UpdateDetailCard()
+    {
+        var selectedSecrets = GetSelectedSecrets();
+        if (selectedSecrets.Count != 1)
+        {
+            var count = selectedSecrets.Count;
+            _detailNameLabel.Text = count > 1 ? $"{count} Eintraege markiert" : "Kein Eintrag";
+            _detailMetaLabel.Text = "Details";
+            _detailUsernameLabel.Text = "-";
+            _detailUrlLabel.Text = "-";
+            _detailSourceLabel.Text = "-";
+            _detailLastUsedLabel.Text = "-";
+            _detailNotesLabel.Text = count > 1 ? "Mehrfachauswahl aktiv." : "Einen Eintrag auswaehlen.";
+            _favoriteButton.Enabled = false;
+            _favoriteButton.Text = "★";
+            return;
+        }
+
+        var secret = selectedSecrets[0];
+        _detailNameLabel.Text = secret.Name;
+        _detailNameLabel.Font = new Font(Font.FontFamily, 13f, FontStyle.Bold);
+        _detailMetaLabel.Text = $"{(secret.IsPrimary ? "Standard" : "Eintrag")} | {secret.EntryType}";
+        _detailUsernameLabel.Text = $"Benutzer: {(string.IsNullOrWhiteSpace(secret.Username) ? "-" : secret.Username)}";
+        _detailUrlLabel.Text = $"URL: {(string.IsNullOrWhiteSpace(secret.Url) ? "-" : secret.Url)}";
+        _detailSourceLabel.Text = $"Quelle: {(string.IsNullOrWhiteSpace(secret.Source) ? "-" : secret.Source)}";
+        _detailLastUsedLabel.Text = $"Zuletzt: {FormatLastUsed(secret.LastUsedAt)}";
+        _detailNotesLabel.Text = string.IsNullOrWhiteSpace(secret.Notes) ? "Keine Notizen." : secret.Notes;
+        _favoriteButton.Enabled = true;
+        _favoriteButton.Text = secret.IsFavorite ? "★" : "☆";
+        _favoriteButton.BackColor = secret.IsFavorite ? _accentColor : _panelColor;
+        _favoriteButton.ForeColor = secret.IsFavorite ? _backgroundColor : _textColor;
+    }
+
+    private static string FormatLastUsed(DateTimeOffset? lastUsedAt)
+    {
+        return lastUsedAt.HasValue ? lastUsedAt.Value.LocalDateTime.ToString("g") : "Nie";
     }
 
     private void ApplySecretRowStyles()
@@ -1664,7 +1866,7 @@ public sealed class MainForm : Form
 
         var versionLabel = new Label
         {
-            Text = "Version: v0.2.2",
+            Text = "Version: v0.2.3",
             AutoSize = true,
             ForeColor = _textColor,
             BackColor = Color.Transparent
