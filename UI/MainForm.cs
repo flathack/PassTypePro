@@ -56,13 +56,14 @@ public sealed class MainForm : Form
     private readonly Panel _dockPage = new() { Dock = DockStyle.Fill };
     private readonly ListBox _dockSecretList = new() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.FixedSingle };
     private readonly ListBox _dockClipboardList = new() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.FixedSingle };
-    private readonly Button _dockUsernameButton = new() { Text = "USER", Dock = DockStyle.Fill };
-    private readonly Button _dockSecretButton = new() { Text = "SECRET", Dock = DockStyle.Fill };
+    private readonly TextBox _dockSearchTextBox = new() { Dock = DockStyle.Fill };
+    private readonly Button _dockUsernameButton = new() { Text = "USR", Dock = DockStyle.Fill };
+    private readonly Button _dockSecretButton = new() { Text = "PW", Dock = DockStyle.Fill };
     private readonly Button _dockTotpButton = new() { Text = "TOTP", Dock = DockStyle.Fill };
-    private readonly Button _dockTypeButton = new() { Text = "TIPPEN", Dock = DockStyle.Fill };
-    private readonly Button _dockClipboardButton = new() { Text = "CLIPBOARD", Dock = DockStyle.Fill };
+    private readonly Button _dockTypeButton = new() { Text = "SEQ", Dock = DockStyle.Fill };
+    private readonly Button _dockClipboardButton = new() { Text = "CLIP", Dock = DockStyle.Fill };
     private readonly Label _dockSecretLabel = new() { Text = "Secrets", AutoSize = true };
-    private readonly Label _dockClipboardLabel = new() { Text = "Clipboard", AutoSize = true };
+    private readonly Label _dockClipboardLabel = new() { Text = "Clips", AutoSize = true };
     private readonly TextBox _unlockPinTextBox = new() { Width = 220, UseSystemPasswordChar = true, PlaceholderText = "PIN" };
     private readonly PatternCanvas _unlockPatternCanvas = new() { Size = new Size(280, 280) };
     private readonly Label _unlockFeedbackLabel = new() { AutoSize = true };
@@ -72,6 +73,8 @@ public sealed class MainForm : Form
     private List<SecretEntry> _allSecrets = [];
     private List<SecretEntry> _currentSecrets = [];
     private List<ClipboardEntry> _currentClipboardEntries = [];
+    private List<SecretEntry> _filteredDockSecrets = [];
+    private List<ClipboardEntry> _filteredDockClipboardEntries = [];
     private bool _isLocked;
     private bool _supportsPin;
     private bool _supportsPattern;
@@ -101,7 +104,7 @@ public sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "PassTypePro";
+        Text = "PassTypePro v0.2.2";
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
@@ -180,6 +183,7 @@ public sealed class MainForm : Form
                 ClipboardReuseRequested?.Invoke(entry);
             }
         };
+        _dockSearchTextBox.TextChanged += (_, _) => ApplyDockFilter(GetSelectedDockSecret()?.Id, GetSelectedDockClipboardEntry()?.CapturedAt);
         _secretGrid.CellDoubleClick += (_, _) =>
         {
             var selectedSecrets = GetSelectedSecrets();
@@ -283,11 +287,9 @@ public sealed class MainForm : Form
         _clipboardGrid.DataSource = _currentClipboardEntries
             .Select(entry => new ClipboardEntry(Shorten(entry.Content), entry.CapturedAt))
             .ToList();
-        _dockClipboardList.DataSource = null;
-        _dockClipboardList.DataSource = _currentClipboardEntries.ToList();
         ApplySecretFilter(selectedSecretId);
+        ApplyDockFilter(selectedSecretId, selectedClipboardTimestamp);
         RestoreClipboardSelection(selectedClipboardTimestamp);
-        RestoreDockSelections(selectedSecretId, selectedClipboardTimestamp);
 
         _lockStatusLabel.Text = isLocked ? "Status: gesperrt" : "Status: entsperrt";
         _unlockButton.Enabled = isLocked;
@@ -347,6 +349,7 @@ public sealed class MainForm : Form
     {
         base.OnResize(e);
         UpdateTabLayout();
+        UpdateUnlockLayout();
     }
 
     private void ConfigureGrids()
@@ -716,11 +719,11 @@ public sealed class MainForm : Form
         var secretActions = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 92,
+            Height = 170,
             ColumnCount = 2,
             RowCount = 2,
             BackColor = _backgroundColor,
-            Padding = new Padding(0, 8, 0, 8)
+            Padding = new Padding(0, 10, 0, 10)
         };
         secretActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
         secretActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
@@ -731,10 +734,19 @@ public sealed class MainForm : Form
         secretActions.Controls.Add(_dockTotpButton, 0, 1);
         secretActions.Controls.Add(_dockTypeButton, 1, 1);
 
+        var searchPanel = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 38,
+            BackColor = _backgroundColor,
+            Padding = new Padding(0, 0, 0, 8)
+        };
+        searchPanel.Controls.Add(_dockSearchTextBox);
+
         var clipboardActions = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 52,
+            Height = 64,
             BackColor = _backgroundColor,
             Padding = new Padding(0, 8, 0, 0)
         };
@@ -743,6 +755,7 @@ public sealed class MainForm : Form
 
         var secretSection = new Panel { Dock = DockStyle.Top, Height = 320, BackColor = _backgroundColor };
         secretSection.Controls.Add(_dockSecretList);
+        secretSection.Controls.Add(searchPanel);
         secretSection.Controls.Add(secretActions);
         secretSection.Controls.Add(new Panel
         {
@@ -764,7 +777,7 @@ public sealed class MainForm : Form
         });
 
         _dockPage.Controls.Clear();
-        _dockPage.Padding = new Padding(10);
+        _dockPage.Padding = new Padding(12);
         _dockPage.BackColor = _backgroundColor;
         _dockPage.Controls.Add(clipboardSection);
         _dockPage.Controls.Add(secretSection);
@@ -891,7 +904,7 @@ public sealed class MainForm : Form
         var rowHeight = enabled ? 44 : 28;
         var font = new Font(Font.FontFamily, enabled ? 11f : 9f, FontStyle.Regular);
         var insertButtonSize = enabled ? new Size(148, 100) : new Size(126, 78);
-        var dockButtonFontSize = enabled ? 10f : 8.5f;
+        var dockButtonFontSize = enabled ? 12f : 10.5f;
 
         foreach (var button in new[] { _insertUsernameButton, _insertSecretButton, _insertTotpButton, _insertSequenceButton, _generalTabButton, _secretsTabButton, _clipboardTabButton, _unlockTabButton })
         {
@@ -929,6 +942,10 @@ public sealed class MainForm : Form
         foreach (var button in new[] { _dockUsernameButton, _dockSecretButton, _dockTotpButton, _dockTypeButton, _dockClipboardButton })
         {
             button.Font = new Font(Font.FontFamily, dockButtonFontSize, FontStyle.Bold);
+        }
+        foreach (var button in new[] { _dockUsernameButton, _dockSecretButton, _dockTotpButton, _dockTypeButton })
+        {
+            button.Padding = new Padding(0);
         }
         _dockSecretList.Font = font;
         _dockClipboardList.Font = font;
@@ -1041,6 +1058,7 @@ public sealed class MainForm : Form
     {
         _unlockPinTextBox.Visible = _supportsPin;
         _unlockPatternCanvas.Visible = _supportsPattern;
+        UpdateUnlockLayout();
     }
 
     private void FocusUnlockInput()
@@ -1096,6 +1114,12 @@ public sealed class MainForm : Form
         }
     }
 
+    private void UpdateUnlockLayout()
+    {
+        var contentWidth = Math.Max(180, _contentHost.ClientSize.Width - 24);
+        _unlockPatternCanvas.Height = _supportsPattern ? Math.Max(180, contentWidth) : 0;
+    }
+
     private void ToggleDockMode()
     {
         if (_isDocked)
@@ -1127,8 +1151,10 @@ public sealed class MainForm : Form
         _tabsPanel.Visible = false;
 
         var area = Screen.FromControl(this).WorkingArea;
-        var width = Math.Min(172, Math.Max(160, area.Width / 6));
-        Bounds = new Rectangle(area.Right - width, area.Top, width, area.Height);
+        var width = Math.Min(280, Math.Max(240, area.Width / 5));
+        var height = Math.Max(360, area.Height / 2);
+        var top = area.Top + Math.Max(0, (area.Height - height) / 2);
+        Bounds = new Rectangle(area.Right - width, top, width, height);
         ShowDockedPage();
         UpdateTabAvailability();
         ConfigureStatusButtons();
@@ -1409,6 +1435,23 @@ public sealed class MainForm : Form
         }
     }
 
+    private void ApplyDockFilter(Guid? selectedSecretId = null, DateTimeOffset? selectedTimestamp = null)
+    {
+        var search = _dockSearchTextBox.Text.Trim();
+        _filteredDockSecrets = string.IsNullOrWhiteSpace(search)
+            ? _currentSecrets.ToList()
+            : _currentSecrets.Where(secret => MatchesSecretSearch(secret, search)).ToList();
+        _filteredDockClipboardEntries = string.IsNullOrWhiteSpace(search)
+            ? _currentClipboardEntries.ToList()
+            : _currentClipboardEntries.Where(entry => entry.Content.Contains(search, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        _dockSecretList.DataSource = null;
+        _dockSecretList.DataSource = _filteredDockSecrets.ToList();
+        _dockClipboardList.DataSource = null;
+        _dockClipboardList.DataSource = _filteredDockClipboardEntries.ToList();
+        RestoreDockSelections(selectedSecretId, selectedTimestamp);
+    }
+
     private void ApplySecretFilter(Guid? selectedSecretId = null)
     {
         var search = _secretSearchTextBox.Text.Trim();
@@ -1621,7 +1664,7 @@ public sealed class MainForm : Form
 
         var versionLabel = new Label
         {
-            Text = "Version: v0.2.0",
+            Text = "Version: v0.2.2",
             AutoSize = true,
             ForeColor = _textColor,
             BackColor = Color.Transparent
