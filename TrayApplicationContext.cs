@@ -21,6 +21,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly TotpService _totpService;
     private readonly TypingSequenceService _typingSequenceService;
     private readonly SecretImportExportService _secretImportExportService;
+    private readonly KeePassImportService _keePassImportService;
     private readonly AutoStartService _autoStartService;
     private readonly ForegroundWindowService _foregroundWindowService;
     private readonly HiddenHotkeyWindow _hiddenWindow;
@@ -42,6 +43,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _totpService = new TotpService();
         _typingSequenceService = new TypingSequenceService(_keyboardInjectionService, _totpService);
         _secretImportExportService = new SecretImportExportService();
+        _keePassImportService = new KeePassImportService();
         _autoStartService = new AutoStartService();
         _foregroundWindowService = new ForegroundWindowService();
 
@@ -289,11 +291,13 @@ public sealed class TrayApplicationContext : ApplicationContext
             _mainForm.SetPrimarySecretRequested += secret => SetPrimarySecret(secret);
             _mainForm.EditSecretRequested += secret => EditSecret(secret);
             _mainForm.DeleteSecretRequested += secret => DeleteSecret(secret);
+            _mainForm.DeleteSecretsRequested += secrets => DeleteSecrets(secrets);
             _mainForm.TypeSecretRequested += secret => _ = TypeEntryAsync(secret);
             _mainForm.ClipboardReuseRequested += entry => ReuseClipboardEntry(entry);
             _mainForm.SaveSettingsRequested += (_, _) => SaveSettingsFromForm();
             _mainForm.ExportSecretsRequested += (_, _) => ExportSecrets();
             _mainForm.ImportSecretsRequested += (_, _) => ImportSecrets();
+            _mainForm.ImportKeePassRequested += (_, _) => ImportKeePass();
             _mainForm.UnlockRequested += (_, _) => _mainForm.ShowUnlockPage();
             _mainForm.UnlockSubmitRequested += (_, _) => SubmitUnlockFromMainForm();
             _mainForm.LockRequested += (_, _) => LockApp();
@@ -349,9 +353,13 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         var existing = _secrets.First(entry => entry.Id == editedSecret.Id);
         existing.Name = editedSecret.Name;
+        existing.GroupPath = editedSecret.GroupPath;
         existing.Username = editedSecret.Username;
+        existing.Url = editedSecret.Url;
         existing.Value = editedSecret.Value;
         existing.TotpSeed = editedSecret.TotpSeed;
+        existing.Notes = editedSecret.Notes;
+        existing.Source = editedSecret.Source;
         existing.SequenceTemplate = editedSecret.SequenceTemplate;
         existing.SecretHotkey = editedSecret.SecretHotkey;
         existing.StartDelayMs = editedSecret.StartDelayMs;
@@ -400,9 +408,23 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void DeleteSecret(SecretEntry secret)
     {
+        DeleteSecrets([secret]);
+    }
+
+    private void DeleteSecrets(IReadOnlyList<SecretEntry> secrets)
+    {
+        if (secrets.Count == 0)
+        {
+            return;
+        }
+
+        var message = secrets.Count == 1
+            ? "Secret wirklich loeschen?"
+            : $"{secrets.Count} Secrets wirklich loeschen?";
+
         var result = MessageBox.Show(
             _mainForm,
-            "Secret wirklich loeschen?",
+            message,
             "PassTypePro",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Question);
@@ -412,7 +434,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             return;
         }
 
-        _secrets.RemoveAll(entry => entry.Id == secret.Id);
+        var ids = secrets.Select(secret => secret.Id).ToHashSet();
+        _secrets.RemoveAll(entry => ids.Contains(entry.Id));
         PersistSecrets();
     }
 
@@ -705,6 +728,53 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         RebuildContextMenu();
         RefreshMainForm();
+    }
+
+    private void ImportKeePass()
+    {
+        if (_mainForm is null || !EnsureUnlocked(_mainForm))
+        {
+            return;
+        }
+
+        using var openDialog = new OpenFileDialog
+        {
+            Filter = "KeePass XML (*.xml)|*.xml|Alle Dateien (*.*)|*.*",
+            Title = "KeePass XML importieren"
+        };
+
+        if (openDialog.ShowDialog(_mainForm) != DialogResult.OK)
+        {
+            return;
+        }
+
+        try
+        {
+            var importedSecrets = _keePassImportService.ImportXml(openDialog.FileName).ToList();
+            foreach (var imported in importedSecrets)
+            {
+                imported.Id = Guid.NewGuid();
+            }
+
+            _secrets.AddRange(importedSecrets);
+            PersistSecrets();
+
+            MessageBox.Show(
+                _mainForm,
+                $"{importedSecrets.Count} Eintraege aus KeePass importiert.",
+                "KeePass-Import",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                _mainForm,
+                ex.Message,
+                "KeePass-Importfehler",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
     }
 
     private void RefreshMainForm()

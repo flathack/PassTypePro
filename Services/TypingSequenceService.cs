@@ -49,6 +49,11 @@ public sealed partial class TypingSequenceService
             return "Kein TOTP konfiguriert";
         }
 
+        if (!_totpService.CanGenerate(entry.TotpSeed))
+        {
+            return "TOTP ungueltig";
+        }
+
         var code = _totpService.GenerateCode(entry.TotpSeed);
         var remaining = _totpService.GetRemainingSeconds();
         return $"{code} ({remaining}s)";

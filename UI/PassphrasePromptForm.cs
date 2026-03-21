@@ -10,6 +10,7 @@ public sealed class PassphrasePromptForm : Form
     private readonly Color _panelColor = Color.FromArgb(35, 42, 50);
     private readonly Color _textColor = Color.FromArgb(231, 237, 243);
     private readonly Color _accentColor = Color.FromArgb(88, 166, 255);
+    private readonly ToolTip _toolTip = new();
     private readonly TextBox _passphraseTextBox = new() { Width = 260, UseSystemPasswordChar = true };
     private readonly TextBox _confirmTextBox = new() { Width = 260, UseSystemPasswordChar = true };
     private readonly bool _confirmRequired;
@@ -35,6 +36,21 @@ public sealed class PassphrasePromptForm : Form
         AcceptButton = okButton;
         CancelButton = cancelButton;
 
+        var passphraseHost = PasswordRevealHelper.CreateRevealHost(
+            _passphraseTextBox,
+            _backgroundColor,
+            _panelColor,
+            _textColor,
+            _accentColor,
+            _toolTip);
+        var confirmHost = PasswordRevealHelper.CreateRevealHost(
+            _confirmTextBox,
+            _backgroundColor,
+            _panelColor,
+            _textColor,
+            _accentColor,
+            _toolTip);
+
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -44,12 +60,12 @@ public sealed class PassphrasePromptForm : Form
         };
 
         layout.Controls.Add(new Label { Text = label, AutoSize = true }, 0, 0);
-        layout.Controls.Add(_passphraseTextBox, 1, 0);
+        layout.Controls.Add(passphraseHost, 1, 0);
 
         if (_confirmRequired)
         {
             layout.Controls.Add(new Label { Text = "Passphrase bestaetigen", AutoSize = true }, 0, 1);
-            layout.Controls.Add(_confirmTextBox, 1, 1);
+            layout.Controls.Add(confirmHost, 1, 1);
         }
 
         var row = _confirmRequired ? 2 : 1;

@@ -27,10 +27,12 @@ public sealed class MainForm : Form
     private readonly CheckBox _touchModeCheckBox = new() { Text = "Touch-Mode", AutoSize = true };
     private readonly NumericUpDown _autoLockMinutesNumeric = new() { Minimum = 0, Maximum = 240, Width = 80 };
     private readonly TextBox _newPinTextBox = new() { Width = 180, UseSystemPasswordChar = true };
-    private readonly DataGridView _secretGrid = new() { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false, MultiSelect = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, RowHeadersVisible = false, AutoGenerateColumns = false, BackgroundColor = Color.FromArgb(29, 35, 41), BorderStyle = BorderStyle.None };
+    private readonly TextBox _secretSearchTextBox = new() { Width = 260 };
+    private readonly DataGridView _secretGrid = new() { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false, MultiSelect = true, SelectionMode = DataGridViewSelectionMode.FullRowSelect, RowHeadersVisible = false, AutoGenerateColumns = false, BackgroundColor = Color.FromArgb(29, 35, 41), BorderStyle = BorderStyle.None };
     private readonly DataGridView _clipboardGrid = new() { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false, MultiSelect = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, RowHeadersVisible = false, AutoGenerateColumns = false, BackgroundColor = Color.FromArgb(29, 35, 41), BorderStyle = BorderStyle.None };
     private readonly Label _lockStatusLabel = new() { AutoSize = true };
     private readonly Label _totpPreviewLabel = new() { AutoSize = true };
+    private readonly Label _secretCountLabel = new() { AutoSize = true };
     private readonly Button _unlockButton = new() { Width = 42, Height = 34 };
     private readonly Button _lockButton = new() { Width = 42, Height = 34 };
     private readonly Button _topMostButton = new() { Width = 42, Height = 34 };
@@ -67,6 +69,7 @@ public sealed class MainForm : Form
     private readonly Button _unlockSubmitButton = new() { Text = "Entsperren", AutoSize = true };
     private readonly Button _unlockResetPatternButton = new() { Text = "Muster zurücksetzen", AutoSize = true };
 
+    private List<SecretEntry> _allSecrets = [];
     private List<SecretEntry> _currentSecrets = [];
     private List<ClipboardEntry> _currentClipboardEntries = [];
     private bool _isLocked;
@@ -82,11 +85,13 @@ public sealed class MainForm : Form
     public event Action<SecretEntry>? SetPrimarySecretRequested;
     public event Action<SecretEntry>? EditSecretRequested;
     public event Action<SecretEntry>? DeleteSecretRequested;
+    public event Action<IReadOnlyList<SecretEntry>>? DeleteSecretsRequested;
     public event Action<SecretEntry>? TypeSecretRequested;
     public event Action<ClipboardEntry>? ClipboardReuseRequested;
     public event EventHandler? SaveSettingsRequested;
     public event EventHandler? ExportSecretsRequested;
     public event EventHandler? ImportSecretsRequested;
+    public event EventHandler? ImportKeePassRequested;
     public event EventHandler? UnlockRequested;
     public event EventHandler? UnlockSubmitRequested;
     public event EventHandler? LockRequested;
@@ -101,7 +106,7 @@ public sealed class MainForm : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(575, 740);
+        ClientSize = new Size(920, 820);
         Padding = new Padding(1);
 
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "passtypepro-lock-dark.ico");
@@ -133,6 +138,7 @@ public sealed class MainForm : Form
             }
         };
         _unlockSubmitButton.Click += (_, _) => UnlockSubmitRequested?.Invoke(this, EventArgs.Empty);
+        _secretSearchTextBox.TextChanged += (_, _) => ApplySecretFilter(GetSelectedSecret()?.Id);
         _unlockPinTextBox.KeyDown += (_, args) =>
         {
             if (args.KeyCode == Keys.Enter)
@@ -172,6 +178,14 @@ public sealed class MainForm : Form
             if (entry is not null)
             {
                 ClipboardReuseRequested?.Invoke(entry);
+            }
+        };
+        _secretGrid.CellDoubleClick += (_, _) =>
+        {
+            var selectedSecrets = GetSelectedSecrets();
+            if (selectedSecrets.Count == 1)
+            {
+                EditSecretRequested?.Invoke(selectedSecrets[0]);
             }
         };
 
@@ -263,25 +277,17 @@ public sealed class MainForm : Form
         var selectedSecretId = GetSelectedSecret()?.Id;
         var selectedClipboardTimestamp = GetSelectedClipboardEntry()?.CapturedAt;
 
-        _currentSecrets = secrets.ToList();
+        _allSecrets = secrets.ToList();
         _currentClipboardEntries = clipboardEntries.ToList();
-
-        _secretGrid.DataSource = null;
-        _secretGrid.DataSource = _currentSecrets;
         _clipboardGrid.DataSource = null;
         _clipboardGrid.DataSource = _currentClipboardEntries
             .Select(entry => new ClipboardEntry(Shorten(entry.Content), entry.CapturedAt))
             .ToList();
-        _dockSecretList.DataSource = null;
-        _dockSecretList.DataSource = _currentSecrets.ToList();
         _dockClipboardList.DataSource = null;
         _dockClipboardList.DataSource = _currentClipboardEntries.ToList();
-
-        RestoreSecretSelection(selectedSecretId);
+        ApplySecretFilter(selectedSecretId);
         RestoreClipboardSelection(selectedClipboardTimestamp);
         RestoreDockSelections(selectedSecretId, selectedClipboardTimestamp);
-        ApplySecretRowStyles();
-        UpdateInsertAvailability();
 
         _lockStatusLabel.Text = isLocked ? "Status: gesperrt" : "Status: entsperrt";
         _unlockButton.Enabled = isLocked;
@@ -366,7 +372,20 @@ public sealed class MainForm : Form
             HeaderText = "Benutzer",
             DataPropertyName = nameof(SecretEntry.Username),
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-            FillWeight = 45
+            FillWeight = 30
+        });
+        _secretGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            HeaderText = "Gruppe",
+            DataPropertyName = nameof(SecretEntry.GroupPath),
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            FillWeight = 26
+        });
+        _secretGrid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            HeaderText = "Typ",
+            DataPropertyName = nameof(SecretEntry.EntryType),
+            Width = 130
         });
 
         _clipboardGrid.Columns.Add(new DataGridViewTextBoxColumn
@@ -429,6 +448,7 @@ public sealed class MainForm : Form
         var fileMenu = new ToolStripMenuItem("Datei");
         fileMenu.DropDownItems.Add("Secrets exportieren", null, (_, _) => ExportSecretsRequested?.Invoke(this, EventArgs.Empty));
         fileMenu.DropDownItems.Add("Secrets importieren", null, (_, _) => ImportSecretsRequested?.Invoke(this, EventArgs.Empty));
+        fileMenu.DropDownItems.Add("KeePass XML importieren", null, (_, _) => ImportKeePassRequested?.Invoke(this, EventArgs.Empty));
         fileMenu.DropDownItems.Add("Entsperrmuster setzen", null, (_, _) => SetUnlockPatternRequested?.Invoke(this, EventArgs.Empty));
         fileMenu.DropDownItems.Add(new ToolStripSeparator());
         fileMenu.DropDownItems.Add("Beenden", null, (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty));
@@ -472,6 +492,14 @@ public sealed class MainForm : Form
 
     private void BuildGeneralPage()
     {
+        var newPinHost = PasswordRevealHelper.CreateRevealHost(
+            _newPinTextBox,
+            _backgroundColor,
+            _panelColor,
+            _textColor,
+            _accentColor,
+            _toolTip);
+
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -496,7 +524,7 @@ public sealed class MainForm : Form
         panel.Controls.Add(_autoLockMinutesNumeric, 1, 8);
         panel.Controls.Add(new Label { Text = "0 = nur bei Windows-Sperre", AutoSize = true }, 1, 9);
         panel.Controls.Add(new Label { Text = "Neue PIN", AutoSize = true }, 0, 10);
-        panel.Controls.Add(_newPinTextBox, 1, 10);
+        panel.Controls.Add(newPinHost, 1, 10);
         panel.Controls.Add(new Label { Text = "Leer lassen = bestehende PIN behalten", AutoSize = true }, 1, 11);
 
         _generalPage.Controls.Clear();
@@ -510,36 +538,67 @@ public sealed class MainForm : Form
         var setPrimaryButton = new Button { Text = "Standard", AutoSize = true };
         var editButton = new Button { Text = "Edit", AutoSize = true };
         var deleteButton = new Button { Text = "X", AutoSize = true };
+        var importKeePassButton = new Button { Text = "KeePass", AutoSize = true };
         addButton.Click += (_, _) => AddSecretRequested?.Invoke(this, EventArgs.Empty);
         setPrimaryButton.Click += (_, _) =>
         {
-            var secret = GetSelectedSecret();
-            if (secret is not null)
+            var selectedSecrets = GetSelectedSecrets();
+            if (selectedSecrets.Count == 1)
             {
-                SetPrimarySecretRequested?.Invoke(secret);
+                SetPrimarySecretRequested?.Invoke(selectedSecrets[0]);
             }
         };
         editButton.Click += (_, _) =>
         {
-            var secret = GetSelectedSecret();
-            if (secret is not null)
+            var selectedSecrets = GetSelectedSecrets();
+            if (selectedSecrets.Count == 1)
             {
-                EditSecretRequested?.Invoke(secret);
+                EditSecretRequested?.Invoke(selectedSecrets[0]);
             }
         };
         deleteButton.Click += (_, _) =>
         {
-            var secret = GetSelectedSecret();
-            if (secret is not null)
+            var selectedSecrets = GetSelectedSecrets();
+            if (selectedSecrets.Count > 1)
             {
-                DeleteSecretRequested?.Invoke(secret);
+                DeleteSecretsRequested?.Invoke(selectedSecrets);
+            }
+            else if (selectedSecrets.Count == 1)
+            {
+                DeleteSecretRequested?.Invoke(selectedSecrets[0]);
             }
         };
-        var buttonPanel = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, BackColor = _backgroundColor };
+        importKeePassButton.Click += (_, _) => ImportKeePassRequested?.Invoke(this, EventArgs.Empty);
+
+        var buttonPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            BackColor = _backgroundColor,
+            Padding = new Padding(0, 8, 0, 0)
+        };
         buttonPanel.Controls.Add(addButton);
         buttonPanel.Controls.Add(setPrimaryButton);
         buttonPanel.Controls.Add(editButton);
         buttonPanel.Controls.Add(deleteButton);
+        buttonPanel.Controls.Add(importKeePassButton);
+
+        var searchPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 42,
+            ColumnCount = 3,
+            BackColor = _backgroundColor,
+            Margin = Padding.Empty,
+            Padding = new Padding(0, 0, 0, 6)
+        };
+        _secretSearchTextBox.Dock = DockStyle.Fill;
+        searchPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        searchPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        searchPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        searchPanel.Controls.Add(new Label { Text = "Suche", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
+        searchPanel.Controls.Add(_secretSearchTextBox, 1, 0);
+        searchPanel.Controls.Add(_secretCountLabel, 2, 0);
 
         var detailsPanel = new FlowLayoutPanel
         {
@@ -572,6 +631,7 @@ public sealed class MainForm : Form
         var panel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12), BackColor = _backgroundColor };
         panel.Controls.Add(_secretGrid);
         panel.Controls.Add(detailsPanel);
+        panel.Controls.Add(searchPanel);
         panel.Controls.Add(buttonPanel);
         panel.Controls.Add(insertPanel);
 
@@ -606,6 +666,14 @@ public sealed class MainForm : Form
 
     private void BuildUnlockPage()
     {
+        var unlockPinHost = PasswordRevealHelper.CreateRevealHost(
+            _unlockPinTextBox,
+            _backgroundColor,
+            _panelColor,
+            _textColor,
+            _accentColor,
+            _toolTip);
+
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -620,8 +688,8 @@ public sealed class MainForm : Form
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        _unlockPinTextBox.Dock = DockStyle.Top;
-        _unlockPinTextBox.Margin = new Padding(0, 0, 0, 10);
+        unlockPinHost.Dock = DockStyle.Top;
+        unlockPinHost.Margin = new Padding(0, 0, 0, 10);
         _unlockPatternCanvas.Dock = DockStyle.Fill;
         _unlockPatternCanvas.Margin = Padding.Empty;
         _unlockSubmitButton.Dock = DockStyle.Top;
@@ -633,7 +701,7 @@ public sealed class MainForm : Form
         _unlockSubmitButton.FlatAppearance.BorderColor = _accentColor;
         _unlockSubmitButton.FlatAppearance.BorderSize = 1;
 
-        panel.Controls.Add(_unlockPinTextBox, 0, 0);
+        panel.Controls.Add(unlockPinHost, 0, 0);
         panel.Controls.Add(_unlockPatternCanvas, 0, 1);
         panel.Controls.Add(_unlockFeedbackLabel, 0, 2);
         panel.Controls.Add(_unlockSubmitButton, 0, 3);
@@ -1341,6 +1409,42 @@ public sealed class MainForm : Form
         }
     }
 
+    private void ApplySecretFilter(Guid? selectedSecretId = null)
+    {
+        var search = _secretSearchTextBox.Text.Trim();
+        _currentSecrets = string.IsNullOrWhiteSpace(search)
+            ? _allSecrets.ToList()
+            : _allSecrets.Where(secret => MatchesSecretSearch(secret, search)).ToList();
+
+        _secretGrid.DataSource = null;
+        _secretGrid.DataSource = _currentSecrets;
+        _dockSecretList.DataSource = null;
+        _dockSecretList.DataSource = _currentSecrets.ToList();
+
+        RestoreSecretSelection(selectedSecretId);
+        ApplySecretRowStyles();
+        UpdateInsertAvailability();
+        UpdateTotpPreview();
+        UpdateSecretCount();
+    }
+
+    private static bool MatchesSecretSearch(SecretEntry secret, string search)
+    {
+        var comparison = StringComparison.OrdinalIgnoreCase;
+        return (!string.IsNullOrWhiteSpace(secret.Name) && secret.Name.Contains(search, comparison)) ||
+               (!string.IsNullOrWhiteSpace(secret.GroupPath) && secret.GroupPath.Contains(search, comparison)) ||
+               (!string.IsNullOrWhiteSpace(secret.Username) && secret.Username.Contains(search, comparison)) ||
+               (!string.IsNullOrWhiteSpace(secret.Url) && secret.Url.Contains(search, comparison)) ||
+               (!string.IsNullOrWhiteSpace(secret.Notes) && secret.Notes.Contains(search, comparison)) ||
+               (!string.IsNullOrWhiteSpace(secret.Source) && secret.Source.Contains(search, comparison));
+    }
+
+    private void UpdateSecretCount()
+    {
+        _secretCountLabel.Text = $"{_currentSecrets.Count} / {_allSecrets.Count} Eintraege";
+        _secretCountLabel.ForeColor = _mutedTextColor;
+    }
+
     private void ApplySecretRowStyles()
     {
         foreach (DataGridViewRow row in _secretGrid.Rows)
@@ -1359,6 +1463,12 @@ public sealed class MainForm : Form
     {
         if (!selectedSecretId.HasValue)
         {
+            if (_secretGrid.Rows.Count > 0)
+            {
+                _secretGrid.Rows[0].Selected = true;
+                _secretGrid.CurrentCell = _secretGrid.Rows[0].Cells[0];
+            }
+
             return;
         }
 
@@ -1393,12 +1503,18 @@ public sealed class MainForm : Form
 
     private SecretEntry? GetSelectedSecret()
     {
-        if (_secretGrid.SelectedRows.Count > 0)
-        {
-            return _secretGrid.SelectedRows[0].DataBoundItem as SecretEntry;
-        }
+        return GetSelectedSecrets().FirstOrDefault() ?? _secretGrid.CurrentRow?.DataBoundItem as SecretEntry;
+    }
 
-        return _secretGrid.CurrentRow?.DataBoundItem as SecretEntry;
+    private List<SecretEntry> GetSelectedSecrets()
+    {
+        return _secretGrid.SelectedRows
+            .Cast<DataGridViewRow>()
+            .Select(row => row.DataBoundItem as SecretEntry)
+            .Where(secret => secret is not null)
+            .Cast<SecretEntry>()
+            .DistinctBy(secret => secret.Id)
+            .ToList();
     }
 
     private ClipboardEntry? GetSelectedClipboardEntry()

@@ -15,11 +15,15 @@ public sealed class SecretEditForm : Form
     private readonly Color _accentColor = Color.FromArgb(88, 166, 255);
 
     private readonly TotpService _totpService = new();
-    private readonly TextBox _nameTextBox = new() { Width = 380 };
-    private readonly TextBox _usernameTextBox = new() { Width = 380 };
-    private readonly TextBox _valueTextBox = new() { Width = 380, UseSystemPasswordChar = true };
-    private readonly TextBox _totpSeedTextBox = new() { Width = 380 };
-    private readonly TextBox _sequenceTextBox = new() { Width = 380 };
+    private readonly TextBox _nameTextBox = new() { Width = 540 };
+    private readonly TextBox _groupPathTextBox = new() { Width = 540 };
+    private readonly TextBox _usernameTextBox = new() { Width = 540 };
+    private readonly TextBox _urlTextBox = new() { Width = 540 };
+    private readonly TextBox _valueTextBox = new() { Width = 540, UseSystemPasswordChar = true };
+    private readonly TextBox _totpSeedTextBox = new() { Width = 540 };
+    private readonly TextBox _sourceTextBox = new() { Width = 540 };
+    private readonly TextBox _notesTextBox = new() { Width = 540, Multiline = true, Height = 130, ScrollBars = ScrollBars.Vertical };
+    private readonly TextBox _sequenceTextBox = new() { Width = 540 };
     private readonly HotkeyTextBox _secretHotkeyTextBox = new() { Width = 200 };
     private readonly NumericUpDown _startDelayNumeric = new() { Minimum = 0, Maximum = 10000, Increment = 50, Width = 100 };
     private readonly NumericUpDown _keystrokeDelayNumeric = new() { Minimum = 0, Maximum = 1000, Increment = 10, Width = 100 };
@@ -36,7 +40,7 @@ public sealed class SecretEditForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(620, 700);
+        ClientSize = new Size(860, 860);
         Padding = new Padding(1);
 
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "passtypepro-lock-dark.ico");
@@ -54,9 +58,13 @@ public sealed class SecretEditForm : Form
         if (existing is not null)
         {
             _nameTextBox.Text = existing.Name;
+            _groupPathTextBox.Text = existing.GroupPath;
             _usernameTextBox.Text = existing.Username;
+            _urlTextBox.Text = existing.Url;
             _valueTextBox.Text = existing.Value;
             _totpSeedTextBox.Text = existing.TotpSeed;
+            _sourceTextBox.Text = existing.Source;
+            _notesTextBox.Text = existing.Notes;
             _sequenceTextBox.Text = existing.SequenceTemplate;
             _secretHotkeyTextBox.SetHotkey(existing.SecretHotkey);
             _startDelayNumeric.Value = existing.StartDelayMs;
@@ -66,9 +74,13 @@ public sealed class SecretEditForm : Form
             {
                 Id = existing.Id,
                 Name = existing.Name,
+                GroupPath = existing.GroupPath,
                 Username = existing.Username,
+                Url = existing.Url,
                 Value = existing.Value,
                 TotpSeed = existing.TotpSeed,
+                Notes = existing.Notes,
+                Source = existing.Source,
                 SequenceTemplate = existing.SequenceTemplate,
                 SecretHotkey = existing.SecretHotkey,
                 StartDelayMs = existing.StartDelayMs,
@@ -83,8 +95,19 @@ public sealed class SecretEditForm : Form
             _keystrokeDelayNumeric.Value = 0;
         }
         _totpSeedTextBox.PlaceholderText = "Base32 TOTP-Seed, z. B. JBSWY3DPEHPK3PXP";
+        _groupPathTextBox.PlaceholderText = "z. B. Infrastruktur / VMware";
+        _urlTextBox.PlaceholderText = "https://...";
+        _sourceTextBox.PlaceholderText = "z. B. KeePass XML";
+        _notesTextBox.PlaceholderText = "Notizen zum Eintrag";
 
         var tokenPanel = BuildTokenPanel();
+        var secretFieldHost = PasswordRevealHelper.CreateRevealHost(
+            _valueTextBox,
+            _backgroundColor,
+            _panelColor,
+            _textColor,
+            _accentColor,
+            _toolTip);
 
         var content = new TableLayoutPanel
         {
@@ -99,18 +122,26 @@ public sealed class SecretEditForm : Form
 
         content.Controls.Add(new Label { Text = "Name", AutoSize = true }, 0, 0);
         content.Controls.Add(_nameTextBox, 1, 0);
-        content.Controls.Add(new Label { Text = "Benutzername", AutoSize = true }, 0, 1);
-        content.Controls.Add(_usernameTextBox, 1, 1);
-        content.Controls.Add(new Label { Text = "Secret", AutoSize = true }, 0, 2);
-        content.Controls.Add(_valueTextBox, 1, 2);
-        content.Controls.Add(new Label { Text = "TOTP-Seed", AutoSize = true }, 0, 3);
-        content.Controls.Add(_totpSeedTextBox, 1, 3);
-        content.Controls.Add(new Label { Text = "Secret-Hotkey", AutoSize = true }, 0, 5);
-        content.Controls.Add(_secretHotkeyTextBox, 1, 5);
-        content.Controls.Add(new Label { Text = "Startverzoegerung", AutoSize = true }, 0, 7);
-        content.Controls.Add(_startDelayNumeric, 1, 7);
-        content.Controls.Add(new Label { Text = "Zeichenverzoegerung", AutoSize = true }, 0, 9);
-        content.Controls.Add(_keystrokeDelayNumeric, 1, 9);
+        content.Controls.Add(new Label { Text = "Gruppe", AutoSize = true }, 0, 1);
+        content.Controls.Add(_groupPathTextBox, 1, 1);
+        content.Controls.Add(new Label { Text = "Benutzername", AutoSize = true }, 0, 2);
+        content.Controls.Add(_usernameTextBox, 1, 2);
+        content.Controls.Add(new Label { Text = "URL", AutoSize = true }, 0, 3);
+        content.Controls.Add(_urlTextBox, 1, 3);
+        content.Controls.Add(new Label { Text = "Secret", AutoSize = true }, 0, 4);
+        content.Controls.Add(secretFieldHost, 1, 4);
+        content.Controls.Add(new Label { Text = "TOTP-Seed", AutoSize = true }, 0, 5);
+        content.Controls.Add(_totpSeedTextBox, 1, 5);
+        content.Controls.Add(new Label { Text = "Quelle", AutoSize = true }, 0, 6);
+        content.Controls.Add(_sourceTextBox, 1, 6);
+        content.Controls.Add(new Label { Text = "Notizen", AutoSize = true }, 0, 7);
+        content.Controls.Add(_notesTextBox, 1, 7);
+        content.Controls.Add(new Label { Text = "Secret-Hotkey", AutoSize = true }, 0, 8);
+        content.Controls.Add(_secretHotkeyTextBox, 1, 8);
+        content.Controls.Add(new Label { Text = "Startverzoegerung", AutoSize = true }, 0, 9);
+        content.Controls.Add(_startDelayNumeric, 1, 9);
+        content.Controls.Add(new Label { Text = "Zeichenverzoegerung", AutoSize = true }, 0, 10);
+        content.Controls.Add(_keystrokeDelayNumeric, 1, 10);
         content.Controls.Add(new Label { Text = "Typing-Sequenz", AutoSize = true }, 0, 11);
         content.Controls.Add(_sequenceTextBox, 1, 11);
         content.Controls.Add(tokenPanel, 1, 12);
@@ -159,9 +190,13 @@ public sealed class SecretEditForm : Form
 
             Secret = Secret ?? new SecretEntry();
             Secret.Name = BuildEntryName();
+            Secret.GroupPath = _groupPathTextBox.Text.Trim();
             Secret.Username = _usernameTextBox.Text.Trim();
+            Secret.Url = _urlTextBox.Text.Trim();
             Secret.Value = _valueTextBox.Text;
             Secret.TotpSeed = _totpSeedTextBox.Text.Trim();
+            Secret.Source = _sourceTextBox.Text.Trim();
+            Secret.Notes = _notesTextBox.Text.Trim();
             Secret.SecretHotkey = _secretHotkeyTextBox.HotkeyText.Trim();
             Secret.StartDelayMs = Decimal.ToInt32(_startDelayNumeric.Value);
             Secret.KeystrokeDelayMs = Decimal.ToInt32(_keystrokeDelayNumeric.Value);
@@ -185,6 +220,12 @@ public sealed class SecretEditForm : Form
         if (!string.IsNullOrWhiteSpace(_usernameTextBox.Text))
         {
             return _usernameTextBox.Text.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(_groupPathTextBox.Text))
+        {
+            return _groupPathTextBox.Text.Trim().Split('/', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).LastOrDefault()
+                ?? _groupPathTextBox.Text.Trim();
         }
 
         if (!string.IsNullOrWhiteSpace(_totpSeedTextBox.Text))
@@ -282,7 +323,7 @@ public sealed class SecretEditForm : Form
         buttonPanel.BackColor = _backgroundColor;
         tokenPanel.BackColor = _backgroundColor;
 
-        foreach (var textBox in new Control[] { _nameTextBox, _usernameTextBox, _valueTextBox, _totpSeedTextBox, _sequenceTextBox, _secretHotkeyTextBox })
+        foreach (var textBox in new Control[] { _nameTextBox, _groupPathTextBox, _usernameTextBox, _urlTextBox, _valueTextBox, _totpSeedTextBox, _sourceTextBox, _notesTextBox, _sequenceTextBox, _secretHotkeyTextBox })
         {
             textBox.BackColor = _surfaceColor;
             textBox.ForeColor = _textColor;

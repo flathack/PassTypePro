@@ -10,6 +10,7 @@ public sealed class PinPromptForm : Form
     private readonly Color _panelColor = Color.FromArgb(35, 42, 50);
     private readonly Color _textColor = Color.FromArgb(231, 237, 243);
     private readonly Color _accentColor = Color.FromArgb(88, 166, 255);
+    private readonly ToolTip _toolTip = new();
     private readonly TextBox _pinTextBox = new() { Width = 220, UseSystemPasswordChar = true };
 
     public string Pin => _pinTextBox.Text;
@@ -32,6 +33,14 @@ public sealed class PinPromptForm : Form
         AcceptButton = okButton;
         CancelButton = cancelButton;
 
+        var pinHost = PasswordRevealHelper.CreateRevealHost(
+            _pinTextBox,
+            _backgroundColor,
+            _panelColor,
+            _textColor,
+            _accentColor,
+            _toolTip);
+
         var buttonPanel = new FlowLayoutPanel
         {
             FlowDirection = FlowDirection.RightToLeft,
@@ -49,7 +58,7 @@ public sealed class PinPromptForm : Form
         };
 
         layout.Controls.Add(new Label { Text = "PIN eingeben", AutoSize = true }, 0, 0);
-        layout.Controls.Add(_pinTextBox, 0, 1);
+        layout.Controls.Add(pinHost, 0, 1);
         layout.Controls.Add(buttonPanel, 0, 2);
 
         Controls.Add(layout);

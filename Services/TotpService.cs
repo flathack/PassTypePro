@@ -7,12 +7,12 @@ public sealed class TotpService
 {
     public bool CanGenerate(string seed)
     {
-        return TryDecodeBase32(seed, out _);
+        return TryDecodeBase32(NormalizeSeed(seed), out _);
     }
 
     public string GenerateCode(string seed, DateTimeOffset? timestamp = null, int digits = 6, int periodSeconds = 30)
     {
-        if (!TryDecodeBase32(seed, out var key))
+        if (!TryDecodeBase32(NormalizeSeed(seed), out var key))
         {
             throw new InvalidOperationException("Der TOTP-Seed ist ungueltig.");
         }
@@ -47,6 +47,40 @@ public sealed class TotpService
         return periodSeconds - elapsed;
     }
 
+    public string NormalizeSeed(string seed)
+    {
+        if (string.IsNullOrWhiteSpace(seed))
+        {
+            return string.Empty;
+        }
+
+        var normalized = seed.Trim();
+
+        if (Uri.TryCreate(normalized, UriKind.Absolute, out var otpauthUri) &&
+            string.Equals(otpauthUri.Scheme, "otpauth", StringComparison.OrdinalIgnoreCase))
+        {
+            var otpauthSecret = ExtractSecretFromQuery(otpauthUri.Query);
+            if (!string.IsNullOrWhiteSpace(otpauthSecret))
+            {
+                normalized = otpauthSecret;
+            }
+        }
+        else
+        {
+            var secretFromText = ExtractSecretFromText(normalized);
+            if (!string.IsNullOrWhiteSpace(secretFromText))
+            {
+                normalized = secretFromText;
+            }
+        }
+
+        return normalized
+            .Replace(" ", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .TrimEnd('=')
+            .ToUpperInvariant();
+    }
+
     private static bool TryDecodeBase32(string value, out byte[] bytes)
     {
         bytes = [];
@@ -56,11 +90,7 @@ public sealed class TotpService
             return false;
         }
 
-        var normalized = value
-            .Trim()
-            .Replace(" ", string.Empty, StringComparison.Ordinal)
-            .TrimEnd('=')
-            .ToUpperInvariant();
+        var normalized = value.Trim();
 
         const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
         var buffer = 0;
@@ -87,5 +117,57 @@ public sealed class TotpService
 
         bytes = [.. output];
         return bytes.Length > 0;
+    }
+
+    private static string ExtractSecretFromText(string value)
+    {
+        var markers = new[]
+        {
+            "secret=",
+            "key=",
+            "totpseed=",
+            "totp=",
+            "otp=",
+            "TimeOtp-Secret-Base32=",
+            "TimeOtp Secret="
+        };
+
+        foreach (var marker in markers)
+        {
+            var index = value.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+            {
+                continue;
+            }
+
+            var start = index + marker.Length;
+            var end = value.IndexOfAny(['&', ';', '\r', '\n'], start);
+            var candidate = end >= 0 ? value[start..end] : value[start..];
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                return Uri.UnescapeDataString(candidate.Trim().Trim('"'));
+            }
+        }
+
+        return value;
+    }
+
+    private static string ExtractSecretFromQuery(string query)
+    {
+        foreach (var part in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var pieces = part.Split('=', 2);
+            if (pieces.Length != 2)
+            {
+                continue;
+            }
+
+            if (string.Equals(Uri.UnescapeDataString(pieces[0]), "secret", StringComparison.OrdinalIgnoreCase))
+            {
+                return Uri.UnescapeDataString(pieces[1]);
+            }
+        }
+
+        return string.Empty;
     }
 }
