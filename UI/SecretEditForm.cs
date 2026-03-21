@@ -101,6 +101,10 @@ public sealed class SecretEditForm : Form
         _notesTextBox.PlaceholderText = "Notizen zum Eintrag";
 
         var tokenPanel = BuildTokenPanel();
+        var nameHost = CreateInputHost(_nameTextBox);
+        var groupHost = CreateInputHost(_groupPathTextBox);
+        var usernameHost = CreateInputHost(_usernameTextBox);
+        var urlHost = CreateInputHost(_urlTextBox);
         var secretFieldHost = PasswordRevealHelper.CreateRevealHost(
             _valueTextBox,
             _backgroundColor,
@@ -108,6 +112,11 @@ public sealed class SecretEditForm : Form
             _textColor,
             _accentColor,
             _toolTip);
+        var totpHost = CreateInputHost(_totpSeedTextBox);
+        var sourceHost = CreateInputHost(_sourceTextBox);
+        var notesHost = CreateInputHost(_notesTextBox, isMultiline: true);
+        var sequenceHost = CreateInputHost(_sequenceTextBox);
+        var hotkeyHost = CreateInputHost(_secretHotkeyTextBox);
 
         var content = new TableLayoutPanel
         {
@@ -121,29 +130,29 @@ public sealed class SecretEditForm : Form
         content.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
         content.Controls.Add(new Label { Text = "Name", AutoSize = true }, 0, 0);
-        content.Controls.Add(_nameTextBox, 1, 0);
+        content.Controls.Add(nameHost, 1, 0);
         content.Controls.Add(new Label { Text = "Gruppe", AutoSize = true }, 0, 1);
-        content.Controls.Add(_groupPathTextBox, 1, 1);
+        content.Controls.Add(groupHost, 1, 1);
         content.Controls.Add(new Label { Text = "Benutzername", AutoSize = true }, 0, 2);
-        content.Controls.Add(_usernameTextBox, 1, 2);
+        content.Controls.Add(usernameHost, 1, 2);
         content.Controls.Add(new Label { Text = "URL", AutoSize = true }, 0, 3);
-        content.Controls.Add(_urlTextBox, 1, 3);
+        content.Controls.Add(urlHost, 1, 3);
         content.Controls.Add(new Label { Text = "Secret", AutoSize = true }, 0, 4);
         content.Controls.Add(secretFieldHost, 1, 4);
         content.Controls.Add(new Label { Text = "TOTP-Seed", AutoSize = true }, 0, 5);
-        content.Controls.Add(_totpSeedTextBox, 1, 5);
+        content.Controls.Add(totpHost, 1, 5);
         content.Controls.Add(new Label { Text = "Quelle", AutoSize = true }, 0, 6);
-        content.Controls.Add(_sourceTextBox, 1, 6);
+        content.Controls.Add(sourceHost, 1, 6);
         content.Controls.Add(new Label { Text = "Notizen", AutoSize = true }, 0, 7);
-        content.Controls.Add(_notesTextBox, 1, 7);
+        content.Controls.Add(notesHost, 1, 7);
         content.Controls.Add(new Label { Text = "Secret-Hotkey", AutoSize = true }, 0, 8);
-        content.Controls.Add(_secretHotkeyTextBox, 1, 8);
+        content.Controls.Add(hotkeyHost, 1, 8);
         content.Controls.Add(new Label { Text = "Startverzoegerung", AutoSize = true }, 0, 9);
         content.Controls.Add(_startDelayNumeric, 1, 9);
         content.Controls.Add(new Label { Text = "Zeichenverzoegerung", AutoSize = true }, 0, 10);
         content.Controls.Add(_keystrokeDelayNumeric, 1, 10);
         content.Controls.Add(new Label { Text = "Typing-Sequenz", AutoSize = true }, 0, 11);
-        content.Controls.Add(_sequenceTextBox, 1, 11);
+        content.Controls.Add(sequenceHost, 1, 11);
         content.Controls.Add(tokenPanel, 1, 12);
         content.Controls.Add(_primaryCheckBox, 1, 13);
 
@@ -309,6 +318,27 @@ public sealed class SecretEditForm : Form
         _sequenceTextBox.Focus();
     }
 
+    private Panel CreateInputHost(TextBox textBox, bool isMultiline = false)
+    {
+        var host = new Panel
+        {
+            Width = textBox.Width + 2,
+            Height = isMultiline ? textBox.Height + 2 : textBox.PreferredHeight + 2,
+            BackColor = _accentColor,
+            Padding = new Padding(1),
+            Margin = textBox.Margin
+        };
+
+        textBox.Dock = DockStyle.Fill;
+        textBox.Margin = Padding.Empty;
+        textBox.BorderStyle = BorderStyle.None;
+        textBox.BackColor = _surfaceColor;
+        textBox.ForeColor = _textColor;
+
+        host.Controls.Add(textBox);
+        return host;
+    }
+
     private void ApplyDarkTheme(
         TableLayoutPanel content,
         Button okButton,
@@ -323,10 +353,11 @@ public sealed class SecretEditForm : Form
         buttonPanel.BackColor = _backgroundColor;
         tokenPanel.BackColor = _backgroundColor;
 
-        foreach (var textBox in new Control[] { _nameTextBox, _groupPathTextBox, _usernameTextBox, _urlTextBox, _valueTextBox, _totpSeedTextBox, _sourceTextBox, _notesTextBox, _sequenceTextBox, _secretHotkeyTextBox })
+        foreach (TextBox textBox in new TextBox[] { _nameTextBox, _groupPathTextBox, _usernameTextBox, _urlTextBox, _valueTextBox, _totpSeedTextBox, _sourceTextBox, _notesTextBox, _sequenceTextBox, _secretHotkeyTextBox })
         {
             textBox.BackColor = _surfaceColor;
             textBox.ForeColor = _textColor;
+            textBox.BorderStyle = BorderStyle.None;
         }
 
         foreach (var numeric in new[] { _startDelayNumeric, _keystrokeDelayNumeric })

@@ -30,13 +30,15 @@ internal static class PasswordRevealHelper
         var host = new Panel
         {
             Width = textBox.Width + toggleButton.Width + 8,
-            Height = Math.Max(textBox.Height, toggleButton.Height),
-            BackColor = backgroundColor,
+            Height = textBox.PreferredHeight + 2,
+            BackColor = accentColor,
+            Padding = new Padding(1),
             Margin = textBox.Margin
         };
 
         textBox.Dock = DockStyle.Fill;
         textBox.Margin = Padding.Empty;
+        textBox.BorderStyle = BorderStyle.None;
         textBox.UseSystemPasswordChar = true;
 
         void ApplyState(bool visible)
