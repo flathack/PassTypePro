@@ -31,23 +31,38 @@ public sealed class MainForm : Form
     private readonly DataGridView _clipboardGrid = new() { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false, MultiSelect = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, RowHeadersVisible = false, AutoGenerateColumns = false, BackgroundColor = Color.FromArgb(29, 35, 41), BorderStyle = BorderStyle.None };
     private readonly Label _lockStatusLabel = new() { AutoSize = true };
     private readonly Label _totpPreviewLabel = new() { AutoSize = true };
-    private readonly Button _unlockButton = new() { Text = "Entsperren", AutoSize = true };
-    private readonly Button _lockButton = new() { Text = "Sperren", AutoSize = true };
-    private readonly Button _generalTabButton = new() { Text = "Allgemein", AutoSize = true };
-    private readonly Button _secretsTabButton = new() { Text = "Secrets", AutoSize = true };
-    private readonly Button _clipboardTabButton = new() { Text = "Clipboard", AutoSize = true };
+    private readonly Button _unlockButton = new() { Width = 42, Height = 34 };
+    private readonly Button _lockButton = new() { Width = 42, Height = 34 };
+    private readonly Button _topMostButton = new() { Width = 42, Height = 34 };
+    private readonly Button _generalTabButton = new() { Text = "Allgemein", Width = 94, Height = 30 };
+    private readonly Button _secretsTabButton = new() { Text = "Secrets", Width = 82, Height = 30 };
+    private readonly Button _clipboardTabButton = new() { Text = "Clipboard", Width = 90, Height = 30 };
+    private readonly Button _unlockTabButton = new() { Text = "Entsperren", Width = 104, Height = 30, Visible = false };
     private readonly Button _aboutButton = new() { Text = "?", Width = 34, Height = 34 };
     private readonly Button _insertUsernameButton = new() { Text = "USERNAME", Width = 126, Height = 78 };
     private readonly Button _insertSecretButton = new() { Text = "SECRET", Width = 126, Height = 78 };
     private readonly Button _insertTotpButton = new() { Text = "TOTP", Width = 126, Height = 78 };
-    private readonly Button _setPatternButton = new() { Text = "Entsperrmuster setzen", AutoSize = true };
+    private readonly Button _saveSettingsButton = new() { Width = 42, Height = 34 };
+    private readonly ToolTip _toolTip = new();
     private readonly Panel _contentHost = new() { Dock = DockStyle.Fill };
     private readonly Panel _generalPage = new() { Dock = DockStyle.Fill, AutoScroll = true };
     private readonly Panel _secretsPage = new() { Dock = DockStyle.Fill };
     private readonly Panel _clipboardPage = new() { Dock = DockStyle.Fill };
+    private readonly Panel _unlockPage = new() { Dock = DockStyle.Fill, AutoScroll = true };
+    private readonly TextBox _unlockPinTextBox = new() { Width = 220, UseSystemPasswordChar = true };
+    private readonly PatternCanvas _unlockPatternCanvas = new() { Size = new Size(280, 280) };
+    private readonly Label _unlockInfoLabel = new() { AutoSize = true };
+    private readonly Label _unlockFeedbackLabel = new() { AutoSize = true };
+    private readonly Label _unlockPinLabel = new() { Text = "PIN", AutoSize = true };
+    private readonly Label _unlockPatternLabel = new() { Text = "Entsperrmuster", AutoSize = true };
+    private readonly Button _unlockSubmitButton = new() { Text = "Entsperren", AutoSize = true };
+    private readonly Button _unlockResetPatternButton = new() { Text = "Muster zurücksetzen", AutoSize = true };
 
     private List<SecretEntry> _currentSecrets = [];
     private List<ClipboardEntry> _currentClipboardEntries = [];
+    private bool _isLocked;
+    private bool _supportsPin;
+    private bool _supportsPattern;
 
     public event EventHandler? AddSecretRequested;
     public event Action<SecretEntry>? SetPrimarySecretRequested;
@@ -59,6 +74,7 @@ public sealed class MainForm : Form
     public event EventHandler? ExportSecretsRequested;
     public event EventHandler? ImportSecretsRequested;
     public event EventHandler? UnlockRequested;
+    public event EventHandler? UnlockSubmitRequested;
     public event EventHandler? LockRequested;
     public event EventHandler? ExitRequested;
     public event EventHandler? SetUnlockPatternRequested;
@@ -71,7 +87,7 @@ public sealed class MainForm : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(920, 760);
+        ClientSize = new Size(575, 740);
         Padding = new Padding(1);
 
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "passtypepro-lock-dark.ico");
@@ -86,11 +102,23 @@ public sealed class MainForm : Form
         _generalTabButton.Click += (_, _) => ShowPage(_generalPage);
         _secretsTabButton.Click += (_, _) => ShowPage(_secretsPage);
         _clipboardTabButton.Click += (_, _) => ShowPage(_clipboardPage);
+        _unlockTabButton.Click += (_, _) => ShowPage(_unlockPage);
         _aboutButton.Click += (_, _) => ShowAboutDialog();
-        _setPatternButton.Click += (_, _) => SetUnlockPatternRequested?.Invoke(this, EventArgs.Empty);
+        _topMostButton.Click += (_, _) => ToggleTopMost();
+        _saveSettingsButton.Click += (_, _) => SaveSettingsRequested?.Invoke(this, EventArgs.Empty);
         _insertUsernameButton.Click += (_, _) => TriggerInsertField(SecretFieldKind.Username);
         _insertSecretButton.Click += (_, _) => TriggerInsertField(SecretFieldKind.Secret);
         _insertTotpButton.Click += (_, _) => TriggerInsertField(SecretFieldKind.Totp);
+        _unlockSubmitButton.Click += (_, _) => UnlockSubmitRequested?.Invoke(this, EventArgs.Empty);
+        _unlockPinTextBox.KeyDown += (_, args) =>
+        {
+            if (args.KeyCode == Keys.Enter)
+            {
+                UnlockSubmitRequested?.Invoke(this, EventArgs.Empty);
+                args.SuppressKeyPress = true;
+            }
+        };
+        _unlockResetPatternButton.Click += (_, _) => _unlockPatternCanvas.ResetPattern();
 
         MainMenuStrip = BuildMenuStrip();
         ConfigureGrids();
@@ -105,6 +133,8 @@ public sealed class MainForm : Form
         lockPanel.Controls.Add(_lockStatusLabel);
         lockPanel.Controls.Add(_unlockButton);
         lockPanel.Controls.Add(_lockButton);
+        lockPanel.Controls.Add(_topMostButton);
+        lockPanel.Controls.Add(_saveSettingsButton);
 
         var topPanel = new TableLayoutPanel
         {
@@ -129,6 +159,7 @@ public sealed class MainForm : Form
         tabsPanel.Controls.Add(_generalTabButton);
         tabsPanel.Controls.Add(_secretsTabButton);
         tabsPanel.Controls.Add(_clipboardTabButton);
+        tabsPanel.Controls.Add(_unlockTabButton);
 
         _contentHost.BackColor = _backgroundColor;
         _contentHost.Padding = new Padding(12);
@@ -141,12 +172,23 @@ public sealed class MainForm : Form
         ShowPage(_generalPage);
         ApplyDarkTheme(this);
         ConfigureInsertButtons();
+        ConfigureStatusButtons();
     }
 
     public Func<SecretEntry, string>? TotpPreviewProvider { get; set; }
 
-    public void Bind(AppConfig config, IReadOnlyList<SecretEntry> secrets, IReadOnlyList<ClipboardEntry> clipboardEntries, bool isLocked)
+    public void Bind(
+        AppConfig config,
+        IReadOnlyList<SecretEntry> secrets,
+        IReadOnlyList<ClipboardEntry> clipboardEntries,
+        bool isLocked,
+        bool supportsPin,
+        bool supportsPattern,
+        string? unlockFeedback = null)
     {
+        _isLocked = isLocked;
+        _supportsPin = supportsPin;
+        _supportsPattern = supportsPattern;
         _primaryHotkeyTextBox.SetHotkey(config.TypePrimarySecretHotkey);
         _managerHotkeyTextBox.SetHotkey(config.OpenManagerHotkey);
         _historyLimitNumeric.Value = config.ClipboardHistoryLimit;
@@ -179,9 +221,24 @@ public sealed class MainForm : Form
         _lockStatusLabel.Text = isLocked ? "Status: gesperrt" : "Status: entsperrt";
         _unlockButton.Enabled = isLocked;
         _lockButton.Enabled = !isLocked && config.LockEnabled;
+        _unlockTabButton.Visible = isLocked;
+        _unlockFeedbackLabel.Text = unlockFeedback ?? string.Empty;
+        _unlockFeedbackLabel.ForeColor = string.IsNullOrWhiteSpace(unlockFeedback) ? _mutedTextColor : Color.FromArgb(255, 134, 134);
+        ConfigureUnlockPage();
         UpdateTotpPreview();
         ApplyTouchMode(config.TouchModeEnabled);
         ApplyDarkTheme(this);
+        UpdateTabAvailability();
+        if (isLocked)
+        {
+            ShowPage(_unlockPage);
+        }
+        else if (_contentHost.Controls.Contains(_unlockPage))
+        {
+            ShowPage(_generalPage);
+            ClearUnlockInput();
+        }
+
         Invalidate();
     }
 
@@ -230,14 +287,7 @@ public sealed class MainForm : Form
             HeaderText = "Benutzer",
             DataPropertyName = nameof(SecretEntry.Username),
             AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-            FillWeight = 33
-        });
-        _secretGrid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            HeaderText = "Hotkey",
-            DataPropertyName = nameof(SecretEntry.SecretHotkey),
-            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-            FillWeight = 25
+            FillWeight = 45
         });
 
         _clipboardGrid.Columns.Add(new DataGridViewTextBoxColumn
@@ -300,6 +350,7 @@ public sealed class MainForm : Form
         var fileMenu = new ToolStripMenuItem("Datei");
         fileMenu.DropDownItems.Add("Secrets exportieren", null, (_, _) => ExportSecretsRequested?.Invoke(this, EventArgs.Empty));
         fileMenu.DropDownItems.Add("Secrets importieren", null, (_, _) => ImportSecretsRequested?.Invoke(this, EventArgs.Empty));
+        fileMenu.DropDownItems.Add("Entsperrmuster setzen", null, (_, _) => SetUnlockPatternRequested?.Invoke(this, EventArgs.Empty));
         fileMenu.DropDownItems.Add(new ToolStripSeparator());
         fileMenu.DropDownItems.Add("Beenden", null, (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty));
 
@@ -319,6 +370,7 @@ public sealed class MainForm : Form
         {
             topMostItem.Checked = _topMostCheckBox.Checked;
             TopMost = _topMostCheckBox.Checked;
+            ConfigureStatusButtons();
         };
         viewMenu.DropDownItems.Add(topMostItem);
 
@@ -334,13 +386,11 @@ public sealed class MainForm : Form
         BuildGeneralPage();
         BuildSecretsPage();
         BuildClipboardPage();
+        BuildUnlockPage();
     }
 
     private void BuildGeneralPage()
     {
-        var saveSettingsButton = new Button { Text = "Einstellungen speichern", AutoSize = true };
-        saveSettingsButton.Click += (_, _) => SaveSettingsRequested?.Invoke(this, EventArgs.Empty);
-
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -368,11 +418,6 @@ public sealed class MainForm : Form
         panel.Controls.Add(_newPinTextBox, 1, 10);
         panel.Controls.Add(new Label { Text = "Leer lassen = bestehende PIN behalten", AutoSize = true }, 1, 11);
 
-        var buttonPanel = new FlowLayoutPanel { AutoSize = true, BackColor = _backgroundColor };
-        buttonPanel.Controls.Add(saveSettingsButton);
-        buttonPanel.Controls.Add(_setPatternButton);
-        panel.Controls.Add(buttonPanel, 1, 12);
-
         _generalPage.Controls.Clear();
         _generalPage.BackColor = _backgroundColor;
         _generalPage.Controls.Add(panel);
@@ -381,10 +426,10 @@ public sealed class MainForm : Form
     private void BuildSecretsPage()
     {
         var addButton = new Button { Text = "Neu", AutoSize = true };
-        var setPrimaryButton = new Button { Text = "Als Standard setzen", AutoSize = true };
-        var editButton = new Button { Text = "Bearbeiten", AutoSize = true };
-        var deleteButton = new Button { Text = "Loeschen", AutoSize = true };
-        var typeButton = new Button { Text = "Profil tippen", AutoSize = true };
+        var setPrimaryButton = new Button { Text = "Standard", AutoSize = true };
+        var editButton = new Button { Text = "Edit", AutoSize = true };
+        var deleteButton = new Button { Text = "X", AutoSize = true };
+        var typeButton = new Button { Text = "Tippen", AutoSize = true };
 
         addButton.Click += (_, _) => AddSecretRequested?.Invoke(this, EventArgs.Empty);
         setPrimaryButton.Click += (_, _) =>
@@ -483,8 +528,46 @@ public sealed class MainForm : Form
         _clipboardPage.Controls.Add(panel);
     }
 
+    private void BuildUnlockPage()
+    {
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Padding = new Padding(20),
+            AutoSize = true,
+            ColumnCount = 1,
+            BackColor = _backgroundColor
+        };
+
+        panel.Controls.Add(new Label
+        {
+            Text = "Die App ist gesperrt. Zum Fortfahren bitte entsperren.",
+            AutoSize = true
+        }, 0, 0);
+        panel.Controls.Add(_unlockInfoLabel, 0, 1);
+        panel.Controls.Add(_unlockPinLabel, 0, 2);
+        panel.Controls.Add(_unlockPinTextBox, 0, 3);
+        panel.Controls.Add(_unlockPatternLabel, 0, 4);
+        panel.Controls.Add(_unlockPatternCanvas, 0, 5);
+
+        var buttonPanel = new FlowLayoutPanel { AutoSize = true, BackColor = _backgroundColor };
+        buttonPanel.Controls.Add(_unlockSubmitButton);
+        buttonPanel.Controls.Add(_unlockResetPatternButton);
+        panel.Controls.Add(buttonPanel, 0, 6);
+        panel.Controls.Add(_unlockFeedbackLabel, 0, 7);
+
+        _unlockPage.Controls.Clear();
+        _unlockPage.BackColor = _backgroundColor;
+        _unlockPage.Controls.Add(panel);
+    }
+
     private void ShowPage(Panel page)
     {
+        if (_isLocked && page != _unlockPage)
+        {
+            return;
+        }
+
         _contentHost.SuspendLayout();
         _contentHost.Controls.Clear();
         _contentHost.Controls.Add(page);
@@ -493,6 +576,12 @@ public sealed class MainForm : Form
         UpdateTabButtonState(_generalTabButton, page == _generalPage);
         UpdateTabButtonState(_secretsTabButton, page == _secretsPage);
         UpdateTabButtonState(_clipboardTabButton, page == _clipboardPage);
+        UpdateTabButtonState(_unlockTabButton, page == _unlockPage);
+
+        if (page == _unlockPage)
+        {
+            FocusUnlockInput();
+        }
     }
 
     private void UpdateTabButtonState(Button button, bool isActive)
@@ -569,18 +658,20 @@ public sealed class MainForm : Form
         UpdateTabButtonState(_generalTabButton, _contentHost.Controls.Contains(_generalPage));
         UpdateTabButtonState(_secretsTabButton, _contentHost.Controls.Contains(_secretsPage));
         UpdateTabButtonState(_clipboardTabButton, _contentHost.Controls.Contains(_clipboardPage));
+        UpdateTabButtonState(_unlockTabButton, _contentHost.Controls.Contains(_unlockPage));
         ConfigureInsertButtons();
+        ConfigureStatusButtons();
     }
 
     private void ApplyTouchMode(bool enabled)
     {
-        var buttonHeight = enabled ? 64 : 42;
-        var buttonWidth = enabled ? 148 : 126;
+        var buttonHeight = enabled ? 58 : 38;
+        var buttonWidth = enabled ? 132 : 108;
         var rowHeight = enabled ? 44 : 28;
         var font = new Font(Font.FontFamily, enabled ? 11f : 9f, FontStyle.Regular);
         var insertButtonSize = enabled ? new Size(148, 100) : new Size(126, 78);
 
-        foreach (var button in new[] { _insertUsernameButton, _insertSecretButton, _insertTotpButton, _generalTabButton, _secretsTabButton, _clipboardTabButton, _unlockButton, _lockButton })
+        foreach (var button in new[] { _insertUsernameButton, _insertSecretButton, _insertTotpButton, _generalTabButton, _secretsTabButton, _clipboardTabButton, _unlockTabButton })
         {
             button.Height = buttonHeight;
             button.Font = new Font(Font.FontFamily, enabled ? 11f : 9f, button.Font.Style);
@@ -592,13 +683,23 @@ public sealed class MainForm : Form
             button.Margin = enabled ? new Padding(0, 0, 14, 0) : new Padding(0, 0, 10, 0);
         }
 
-        foreach (var button in new[] { _generalTabButton, _secretsTabButton, _clipboardTabButton, _unlockButton, _lockButton })
+        foreach (var button in new[] { _generalTabButton, _secretsTabButton, _clipboardTabButton, _unlockTabButton })
         {
-            button.Width = Math.Max(buttonWidth, button.PreferredSize.Width + 18);
+            button.Width = button switch
+            {
+                var current when current == _generalTabButton => enabled ? 110 : 94,
+                var current when current == _secretsTabButton => enabled ? 96 : 82,
+                var current when current == _unlockTabButton => enabled ? 118 : 104,
+                _ => enabled ? 104 : 90
+            };
         }
 
         _aboutButton.Size = enabled ? new Size(42, 42) : new Size(34, 34);
         _aboutButton.Font = new Font(Font.FontFamily, enabled ? 12f : 10f, FontStyle.Bold);
+        _unlockButton.Size = enabled ? new Size(48, 40) : new Size(42, 34);
+        _lockButton.Size = enabled ? new Size(48, 40) : new Size(42, 34);
+        _topMostButton.Size = enabled ? new Size(48, 40) : new Size(42, 34);
+        _saveSettingsButton.Size = enabled ? new Size(48, 40) : new Size(42, 34);
 
         _secretGrid.RowTemplate.Height = rowHeight;
         _clipboardGrid.RowTemplate.Height = rowHeight;
@@ -607,6 +708,7 @@ public sealed class MainForm : Form
         _secretGrid.ColumnHeadersHeight = enabled ? 42 : 34;
         _clipboardGrid.ColumnHeadersHeight = enabled ? 42 : 34;
         ConfigureInsertButtons();
+        ConfigureStatusButtons();
     }
 
     private void ConfigureInsertButtons()
@@ -621,6 +723,101 @@ public sealed class MainForm : Form
         ConfigureInsertButton(_insertUsernameButton, CreateUserIcon(28, _accentColor), "USERNAME");
         ConfigureInsertButton(_insertSecretButton, CreateLockIcon(28, _accentColor), "SECRET");
         ConfigureInsertButton(_insertTotpButton, CreateTotpIcon(28, _accentColor), "TOTP");
+    }
+
+    private void ConfigureStatusButtons()
+    {
+        ConfigureStatusButton(_unlockButton, CreateUnlockIcon(20, _accentColor), "Entsperren");
+        ConfigureStatusButton(_lockButton, CreateLockedIcon(20, _accentColor), "Sperren");
+        ConfigureStatusButton(
+            _topMostButton,
+            _topMostCheckBox.Checked ? CreatePinnedIcon(20, _accentColor) : CreatePinIcon(20, _accentColor),
+            _topMostCheckBox.Checked ? "Immer im Vordergrund ist aktiv" : "Immer im Vordergrund aktivieren");
+        ConfigureStatusButton(_saveSettingsButton, CreateSaveIcon(20, _accentColor), "Einstellungen speichern");
+    }
+
+    private void ConfigureStatusButton(Button button, Image image, string toolTipText)
+    {
+        var previousImage = button.Image;
+        button.Text = string.Empty;
+        button.Image = image;
+        previousImage?.Dispose();
+        button.Padding = new Padding(0);
+        button.Margin = new Padding(8, 0, 0, 0);
+        button.FlatStyle = FlatStyle.Flat;
+        button.FlatAppearance.BorderSize = 1;
+        button.FlatAppearance.BorderColor = _accentColor;
+        button.BackColor = _panelColor;
+        button.ForeColor = _textColor;
+        button.ImageAlign = ContentAlignment.MiddleCenter;
+        button.TextAlign = ContentAlignment.MiddleCenter;
+        button.TabStop = false;
+        _toolTip.SetToolTip(button, toolTipText);
+    }
+
+    private void ToggleTopMost()
+    {
+        _topMostCheckBox.Checked = !_topMostCheckBox.Checked;
+        TopMost = _topMostCheckBox.Checked;
+        ConfigureStatusButtons();
+    }
+
+    public void ShowUnlockPage()
+    {
+        ShowPage(_unlockPage);
+    }
+
+    public string EnteredUnlockPin => _unlockPinTextBox.Text;
+
+    public string EnteredUnlockPattern => _unlockPatternCanvas.GetPattern();
+
+    public void SetUnlockFeedback(string? message)
+    {
+        _unlockFeedbackLabel.Text = message ?? string.Empty;
+        _unlockFeedbackLabel.ForeColor = string.IsNullOrWhiteSpace(message) ? _mutedTextColor : Color.FromArgb(255, 134, 134);
+    }
+
+    public void ClearUnlockInput()
+    {
+        _unlockPinTextBox.Clear();
+        _unlockPatternCanvas.ResetPattern();
+        _unlockFeedbackLabel.Text = string.Empty;
+    }
+
+    private void ConfigureUnlockPage()
+    {
+        _unlockInfoLabel.Text = _supportsPin && _supportsPattern
+            ? "PIN oder Muster verwenden."
+            : _supportsPattern
+                ? "Bitte das Entsperrmuster zeichnen."
+                : "Bitte die PIN eingeben.";
+        _unlockPinLabel.Visible = _supportsPin;
+        _unlockPinTextBox.Visible = _supportsPin;
+        _unlockPatternLabel.Visible = _supportsPattern;
+        _unlockPatternCanvas.Visible = _supportsPattern;
+        _unlockResetPatternButton.Visible = _supportsPattern;
+    }
+
+    private void FocusUnlockInput()
+    {
+        if (_supportsPin)
+        {
+            _unlockPinTextBox.Focus();
+            return;
+        }
+
+        if (_supportsPattern)
+        {
+            _unlockPatternCanvas.Focus();
+        }
+    }
+
+    private void UpdateTabAvailability()
+    {
+        _generalTabButton.Enabled = !_isLocked;
+        _secretsTabButton.Enabled = !_isLocked;
+        _clipboardTabButton.Enabled = !_isLocked;
+        _unlockTabButton.Enabled = _isLocked;
     }
 
     private void ConfigureInsertButton(Button button, Image image, string text)
@@ -660,7 +857,99 @@ public sealed class MainForm : Form
         using var brush = new SolidBrush(color);
         graphics.DrawArc(pen, size * 0.23f, size * 0.05f, size * 0.54f, size * 0.52f, 200, 140);
         graphics.FillRectangle(brush, size * 0.2f, size * 0.42f, size * 0.6f, size * 0.38f);
-        graphics.FillEllipse(new SolidBrush(Color.FromArgb(20, 24, 28)), size * 0.44f, size * 0.53f, size * 0.12f, size * 0.12f);
+        using var innerBrush = new SolidBrush(Color.FromArgb(20, 24, 28));
+        graphics.FillEllipse(innerBrush, size * 0.44f, size * 0.53f, size * 0.12f, size * 0.12f);
+        return bitmap;
+    }
+
+    private static Bitmap CreateLockedIcon(int size, Color color)
+    {
+        return CreateLockStateIcon(size, color, isUnlocked: false);
+    }
+
+    private static Bitmap CreateUnlockIcon(int size, Color color)
+    {
+        return CreateLockStateIcon(size, color, isUnlocked: true);
+    }
+
+    private static Bitmap CreateLockStateIcon(int size, Color color, bool isUnlocked)
+    {
+        var bitmap = new Bitmap(size, size);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var pen = new Pen(color, 2.2f);
+        using var bodyBrush = new SolidBrush(color);
+        using var innerBrush = new SolidBrush(Color.FromArgb(20, 24, 28));
+
+        graphics.FillRectangle(bodyBrush, size * 0.2f, size * 0.44f, size * 0.6f, size * 0.34f);
+        graphics.FillEllipse(innerBrush, size * 0.45f, size * 0.54f, size * 0.1f, size * 0.1f);
+
+        if (isUnlocked)
+        {
+            graphics.DrawArc(pen, size * 0.02f, size * 0.07f, size * 0.58f, size * 0.56f, 200, 138);
+            graphics.DrawLine(pen, size * 0.44f, size * 0.27f, size * 0.66f, size * 0.2f);
+        }
+        else
+        {
+            graphics.DrawArc(pen, size * 0.22f, size * 0.08f, size * 0.56f, size * 0.52f, 200, 140);
+            graphics.DrawLine(pen, size * 0.22f, size * 0.2f, size * 0.78f, size * 0.82f);
+        }
+
+        return bitmap;
+    }
+
+    private static Bitmap CreatePinIcon(int size, Color color)
+    {
+        return CreatePushPinIcon(size, color, pinned: false);
+    }
+
+    private static Bitmap CreatePinnedIcon(int size, Color color)
+    {
+        return CreatePushPinIcon(size, color, pinned: true);
+    }
+
+    private static Bitmap CreatePushPinIcon(int size, Color color, bool pinned)
+    {
+        var bitmap = new Bitmap(size, size);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var pen = new Pen(color, 2.0f);
+        using var brush = new SolidBrush(color);
+
+        if (pinned)
+        {
+            graphics.FillEllipse(brush, size * 0.3f, size * 0.08f, size * 0.4f, size * 0.24f);
+            graphics.FillRectangle(brush, size * 0.44f, size * 0.3f, size * 0.12f, size * 0.32f);
+            graphics.DrawLine(pen, size * 0.5f, size * 0.62f, size * 0.5f, size * 0.92f);
+            graphics.DrawLine(pen, size * 0.24f, size * 0.36f, size * 0.76f, size * 0.36f);
+        }
+        else
+        {
+            graphics.TranslateTransform(size * 0.18f, size * 0.22f);
+            graphics.RotateTransform(-36f);
+            graphics.FillEllipse(brush, size * 0.16f, size * 0.02f, size * 0.34f, size * 0.2f);
+            graphics.FillRectangle(brush, size * 0.3f, size * 0.2f, size * 0.12f, size * 0.34f);
+            graphics.DrawLine(pen, size * 0.36f, size * 0.54f, size * 0.36f, size * 0.9f);
+            graphics.ResetTransform();
+        }
+
+        return bitmap;
+    }
+
+    private static Bitmap CreateSaveIcon(int size, Color color)
+    {
+        var bitmap = new Bitmap(size, size);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var pen = new Pen(color, 2.0f);
+        using var brush = new SolidBrush(color);
+        using var innerBrush = new SolidBrush(Color.FromArgb(20, 24, 28));
+
+        graphics.FillRectangle(brush, size * 0.16f, size * 0.14f, size * 0.68f, size * 0.72f);
+        graphics.FillRectangle(innerBrush, size * 0.28f, size * 0.2f, size * 0.34f, size * 0.18f);
+        graphics.FillRectangle(innerBrush, size * 0.28f, size * 0.52f, size * 0.28f, size * 0.18f);
+        graphics.DrawRectangle(pen, size * 0.16f, size * 0.14f, size * 0.68f, size * 0.72f);
+        graphics.DrawLine(pen, size * 0.62f, size * 0.14f, size * 0.62f, size * 0.38f);
         return bitmap;
     }
 
@@ -838,7 +1127,7 @@ public sealed class MainForm : Form
 
         var versionLabel = new Label
         {
-            Text = "Version: v0.1.0",
+            Text = "Version: v0.2.0",
             AutoSize = true,
             ForeColor = _textColor,
             BackColor = Color.Transparent

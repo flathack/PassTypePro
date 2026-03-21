@@ -32,6 +32,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private ClipboardHistoryService _clipboardHistoryService;
     private List<SecretEntry> _secrets;
     private MainForm? _mainForm;
+    private string? _unlockFeedback;
 
     public TrayApplicationContext()
     {
@@ -184,29 +185,10 @@ public sealed class TrayApplicationContext : ApplicationContext
             return true;
         }
 
-        if (_appLockService.HasPattern)
-        {
-            using var patternPrompt = new PatternPromptForm("PassTypePro entsperren", confirmRequired: false);
-            var patternResult = owner is null ? patternPrompt.ShowDialog() : patternPrompt.ShowDialog(owner);
-            if (patternResult != DialogResult.OK || !_appLockService.TryUnlockPattern(patternPrompt.Pattern ?? string.Empty))
-            {
-                _notifyIcon.ShowBalloonTip(2000, "PassTypePro", "Entsperren fehlgeschlagen.", ToolTipIcon.Warning);
-                return false;
-            }
-        }
-        else
-        {
-            using var prompt = new PinPromptForm();
-            var result = owner is null ? prompt.ShowDialog() : prompt.ShowDialog(owner);
-            if (result != DialogResult.OK || !_appLockService.TryUnlock(prompt.Pin))
-            {
-                _notifyIcon.ShowBalloonTip(2000, "PassTypePro", "Entsperren fehlgeschlagen.", ToolTipIcon.Warning);
-                return false;
-            }
-        }
-
-        RefreshUi();
-        return true;
+        _unlockFeedback = "Bitte im Hauptfenster entsperren.";
+        ShowManager();
+        _mainForm?.ShowUnlockPage();
+        return false;
     }
 
     private void LockApp()
@@ -286,11 +268,6 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         _foregroundWindowService.CaptureCurrentExternalWindow();
 
-        if (!EnsureUnlocked(_mainForm))
-        {
-            return;
-        }
-
         if (_mainForm is null || _mainForm.IsDisposed)
         {
             _mainForm = new MainForm();
@@ -305,7 +282,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             _mainForm.SaveSettingsRequested += (_, _) => SaveSettingsFromForm();
             _mainForm.ExportSecretsRequested += (_, _) => ExportSecrets();
             _mainForm.ImportSecretsRequested += (_, _) => ImportSecrets();
-            _mainForm.UnlockRequested += (_, _) => EnsureUnlocked(_mainForm);
+            _mainForm.UnlockRequested += (_, _) => _mainForm.ShowUnlockPage();
+            _mainForm.UnlockSubmitRequested += (_, _) => SubmitUnlockFromMainForm();
             _mainForm.LockRequested += (_, _) => LockApp();
             _mainForm.ExitRequested += (_, _) => ExitThread();
             _mainForm.SetUnlockPatternRequested += (_, _) => SetUnlockPattern();
@@ -316,6 +294,10 @@ public sealed class TrayApplicationContext : ApplicationContext
         _mainForm.Show();
         _mainForm.BringToFront();
         _mainForm.Activate();
+        if (_appLockService.IsLocked)
+        {
+            _mainForm.ShowUnlockPage();
+        }
     }
 
     private void AddSecret()
@@ -715,7 +697,48 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void RefreshMainForm()
     {
-        _mainForm?.Bind(_config, _secrets, _clipboardHistoryService.Entries, _appLockService.IsLocked);
+        _mainForm?.Bind(
+            _config,
+            _secrets,
+            _clipboardHistoryService.Entries,
+            _appLockService.IsLocked,
+            _appLockService.HasPin,
+            _appLockService.HasPattern,
+            _unlockFeedback);
+    }
+
+    private void SubmitUnlockFromMainForm()
+    {
+        if (_mainForm is null)
+        {
+            return;
+        }
+
+        var pattern = _mainForm.EnteredUnlockPattern;
+        var pin = _mainForm.EnteredUnlockPin;
+
+        var success = false;
+        if (_appLockService.HasPattern && !string.IsNullOrWhiteSpace(pattern))
+        {
+            success = _appLockService.TryUnlockPattern(pattern);
+        }
+
+        if (!success && _appLockService.HasPin && !string.IsNullOrWhiteSpace(pin))
+        {
+            success = _appLockService.TryUnlock(pin);
+        }
+
+        if (!success)
+        {
+            _unlockFeedback = "Entsperren fehlgeschlagen. Bitte Daten prüfen.";
+            RefreshMainForm();
+            _mainForm.ShowUnlockPage();
+            return;
+        }
+
+        _unlockFeedback = null;
+        _mainForm.ClearUnlockInput();
+        RefreshUi();
     }
 
     private static string Shorten(string value)

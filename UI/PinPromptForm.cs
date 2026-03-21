@@ -22,6 +22,7 @@ public sealed class PinPromptForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
+        TopMost = true;
         AutoSize = true;
         AutoSizeMode = AutoSizeMode.GrowAndShrink;
 
@@ -53,6 +54,11 @@ public sealed class PinPromptForm : Form
 
         Controls.Add(layout);
         ApplyDarkTheme(layout, buttonPanel, okButton, cancelButton);
+        Shown += (_, _) =>
+        {
+            Activate();
+            _pinTextBox.Focus();
+        };
     }
 
     private void ApplyDarkTheme(TableLayoutPanel layout, FlowLayoutPanel buttonPanel, Button okButton, Button cancelButton)
