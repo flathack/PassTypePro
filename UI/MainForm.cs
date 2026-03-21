@@ -34,14 +34,16 @@ public sealed class MainForm : Form
     private readonly Button _unlockButton = new() { Width = 42, Height = 34 };
     private readonly Button _lockButton = new() { Width = 42, Height = 34 };
     private readonly Button _topMostButton = new() { Width = 42, Height = 34 };
-    private readonly Button _generalTabButton = new() { Text = "Allgemein", Width = 94, Height = 30 };
-    private readonly Button _secretsTabButton = new() { Text = "Secrets", Width = 82, Height = 30 };
-    private readonly Button _clipboardTabButton = new() { Text = "Clipboard", Width = 90, Height = 30 };
-    private readonly Button _unlockTabButton = new() { Text = "Entsperren", Width = 104, Height = 30, Visible = false };
+    private readonly Button _dockToggleButton = new() { Width = 42, Height = 34 };
+    private readonly Button _generalTabButton = new() { Text = "Allgemein", Width = 94, Height = 36 };
+    private readonly Button _secretsTabButton = new() { Text = "Secrets", Width = 82, Height = 36 };
+    private readonly Button _clipboardTabButton = new() { Text = "Clipboard", Width = 90, Height = 36 };
+    private readonly Button _unlockTabButton = new() { Text = "Entsperren", Width = 104, Height = 36, Visible = false };
     private readonly Button _aboutButton = new() { Text = "?", Width = 34, Height = 34 };
     private readonly Button _insertUsernameButton = new() { Text = "USERNAME", Width = 126, Height = 78 };
     private readonly Button _insertSecretButton = new() { Text = "SECRET", Width = 126, Height = 78 };
     private readonly Button _insertTotpButton = new() { Text = "TOTP", Width = 126, Height = 78 };
+    private readonly Button _insertSequenceButton = new() { Text = "SEQ", Width = 126, Height = 78 };
     private readonly Button _saveSettingsButton = new() { Width = 42, Height = 34 };
     private readonly ToolTip _toolTip = new();
     private readonly Panel _contentHost = new() { Dock = DockStyle.Fill };
@@ -49,12 +51,19 @@ public sealed class MainForm : Form
     private readonly Panel _secretsPage = new() { Dock = DockStyle.Fill };
     private readonly Panel _clipboardPage = new() { Dock = DockStyle.Fill };
     private readonly Panel _unlockPage = new() { Dock = DockStyle.Fill, AutoScroll = true };
-    private readonly TextBox _unlockPinTextBox = new() { Width = 220, UseSystemPasswordChar = true };
+    private readonly Panel _dockPage = new() { Dock = DockStyle.Fill };
+    private readonly ListBox _dockSecretList = new() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.FixedSingle };
+    private readonly ListBox _dockClipboardList = new() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.FixedSingle };
+    private readonly Button _dockUsernameButton = new() { Text = "USER", Dock = DockStyle.Fill };
+    private readonly Button _dockSecretButton = new() { Text = "SECRET", Dock = DockStyle.Fill };
+    private readonly Button _dockTotpButton = new() { Text = "TOTP", Dock = DockStyle.Fill };
+    private readonly Button _dockTypeButton = new() { Text = "TIPPEN", Dock = DockStyle.Fill };
+    private readonly Button _dockClipboardButton = new() { Text = "CLIPBOARD", Dock = DockStyle.Fill };
+    private readonly Label _dockSecretLabel = new() { Text = "Secrets", AutoSize = true };
+    private readonly Label _dockClipboardLabel = new() { Text = "Clipboard", AutoSize = true };
+    private readonly TextBox _unlockPinTextBox = new() { Width = 220, UseSystemPasswordChar = true, PlaceholderText = "PIN" };
     private readonly PatternCanvas _unlockPatternCanvas = new() { Size = new Size(280, 280) };
-    private readonly Label _unlockInfoLabel = new() { AutoSize = true };
     private readonly Label _unlockFeedbackLabel = new() { AutoSize = true };
-    private readonly Label _unlockPinLabel = new() { Text = "PIN", AutoSize = true };
-    private readonly Label _unlockPatternLabel = new() { Text = "Entsperrmuster", AutoSize = true };
     private readonly Button _unlockSubmitButton = new() { Text = "Entsperren", AutoSize = true };
     private readonly Button _unlockResetPatternButton = new() { Text = "Muster zurücksetzen", AutoSize = true };
 
@@ -63,6 +72,11 @@ public sealed class MainForm : Form
     private bool _isLocked;
     private bool _supportsPin;
     private bool _supportsPattern;
+    private bool _isDocked;
+    private Rectangle _normalBounds;
+    private bool _restoreTopMostAfterDock;
+    private readonly TableLayoutPanel _topPanel;
+    private readonly FlowLayoutPanel _tabsPanel;
 
     public event EventHandler? AddSecretRequested;
     public event Action<SecretEntry>? SetPrimarySecretRequested;
@@ -105,10 +119,19 @@ public sealed class MainForm : Form
         _unlockTabButton.Click += (_, _) => ShowPage(_unlockPage);
         _aboutButton.Click += (_, _) => ShowAboutDialog();
         _topMostButton.Click += (_, _) => ToggleTopMost();
+        _dockToggleButton.Click += (_, _) => ToggleDockMode();
         _saveSettingsButton.Click += (_, _) => SaveSettingsRequested?.Invoke(this, EventArgs.Empty);
         _insertUsernameButton.Click += (_, _) => TriggerInsertField(SecretFieldKind.Username);
         _insertSecretButton.Click += (_, _) => TriggerInsertField(SecretFieldKind.Secret);
         _insertTotpButton.Click += (_, _) => TriggerInsertField(SecretFieldKind.Totp);
+        _insertSequenceButton.Click += (_, _) =>
+        {
+            var secret = GetSelectedSecret();
+            if (secret is not null)
+            {
+                TypeSecretRequested?.Invoke(secret);
+            }
+        };
         _unlockSubmitButton.Click += (_, _) => UnlockSubmitRequested?.Invoke(this, EventArgs.Empty);
         _unlockPinTextBox.KeyDown += (_, args) =>
         {
@@ -118,7 +141,39 @@ public sealed class MainForm : Form
                 args.SuppressKeyPress = true;
             }
         };
-        _unlockResetPatternButton.Click += (_, _) => _unlockPatternCanvas.ResetPattern();
+        _dockSecretList.Format += (_, args) =>
+        {
+            if (args.ListItem is SecretEntry secret)
+            {
+                args.Value = secret.IsPrimary ? $"* {secret.Name}" : secret.Name;
+            }
+        };
+        _dockClipboardList.Format += (_, args) =>
+        {
+            if (args.ListItem is ClipboardEntry entry)
+            {
+                args.Value = Shorten(entry.Content);
+            }
+        };
+        _dockUsernameButton.Click += (_, _) => TriggerDockInsert(SecretFieldKind.Username);
+        _dockSecretButton.Click += (_, _) => TriggerDockInsert(SecretFieldKind.Secret);
+        _dockTotpButton.Click += (_, _) => TriggerDockInsert(SecretFieldKind.Totp);
+        _dockTypeButton.Click += (_, _) =>
+        {
+            var secret = GetSelectedDockSecret();
+            if (secret is not null)
+            {
+                TypeSecretRequested?.Invoke(secret);
+            }
+        };
+        _dockClipboardButton.Click += (_, _) =>
+        {
+            var entry = GetSelectedDockClipboardEntry();
+            if (entry is not null)
+            {
+                ClipboardReuseRequested?.Invoke(entry);
+            }
+        };
 
         MainMenuStrip = BuildMenuStrip();
         ConfigureGrids();
@@ -134,9 +189,10 @@ public sealed class MainForm : Form
         lockPanel.Controls.Add(_unlockButton);
         lockPanel.Controls.Add(_lockButton);
         lockPanel.Controls.Add(_topMostButton);
+        lockPanel.Controls.Add(_dockToggleButton);
         lockPanel.Controls.Add(_saveSettingsButton);
 
-        var topPanel = new TableLayoutPanel
+        _topPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             AutoSize = true,
@@ -144,35 +200,38 @@ public sealed class MainForm : Form
             Padding = new Padding(12, 12, 12, 0),
             BackColor = _backgroundColor
         };
-        topPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        topPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        topPanel.Controls.Add(lockPanel, 0, 0);
-        topPanel.Controls.Add(_aboutButton, 1, 0);
+        _topPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        _topPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _topPanel.Controls.Add(lockPanel, 0, 0);
+        _topPanel.Controls.Add(_aboutButton, 1, 0);
 
-        var tabsPanel = new FlowLayoutPanel
+        _tabsPanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
-            AutoSize = true,
-            Padding = new Padding(12, 8, 12, 0),
+            AutoSize = false,
+            Height = 62,
+            WrapContents = false,
+            Padding = new Padding(12, 10, 12, 14),
             BackColor = _backgroundColor
         };
-        tabsPanel.Controls.Add(_generalTabButton);
-        tabsPanel.Controls.Add(_secretsTabButton);
-        tabsPanel.Controls.Add(_clipboardTabButton);
-        tabsPanel.Controls.Add(_unlockTabButton);
+        _tabsPanel.Controls.Add(_generalTabButton);
+        _tabsPanel.Controls.Add(_secretsTabButton);
+        _tabsPanel.Controls.Add(_clipboardTabButton);
+        _tabsPanel.Controls.Add(_unlockTabButton);
 
         _contentHost.BackColor = _backgroundColor;
         _contentHost.Padding = new Padding(12);
 
         Controls.Add(_contentHost);
-        Controls.Add(tabsPanel);
-        Controls.Add(topPanel);
+        Controls.Add(_tabsPanel);
+        Controls.Add(_topPanel);
         Controls.Add(MainMenuStrip);
 
         ShowPage(_generalPage);
         ApplyDarkTheme(this);
         ConfigureInsertButtons();
         ConfigureStatusButtons();
+        UpdateTabLayout();
     }
 
     public Func<SecretEntry, string>? TotpPreviewProvider { get; set; }
@@ -213,10 +272,16 @@ public sealed class MainForm : Form
         _clipboardGrid.DataSource = _currentClipboardEntries
             .Select(entry => new ClipboardEntry(Shorten(entry.Content), entry.CapturedAt))
             .ToList();
+        _dockSecretList.DataSource = null;
+        _dockSecretList.DataSource = _currentSecrets.ToList();
+        _dockClipboardList.DataSource = null;
+        _dockClipboardList.DataSource = _currentClipboardEntries.ToList();
 
         RestoreSecretSelection(selectedSecretId);
         RestoreClipboardSelection(selectedClipboardTimestamp);
+        RestoreDockSelections(selectedSecretId, selectedClipboardTimestamp);
         ApplySecretRowStyles();
+        UpdateInsertAvailability();
 
         _lockStatusLabel.Text = isLocked ? "Status: gesperrt" : "Status: entsperrt";
         _unlockButton.Enabled = isLocked;
@@ -232,6 +297,10 @@ public sealed class MainForm : Form
         if (isLocked)
         {
             ShowPage(_unlockPage);
+        }
+        else if (_isDocked)
+        {
+            ShowDockedPage();
         }
         else if (_contentHost.Controls.Contains(_unlockPage))
         {
@@ -268,12 +337,22 @@ public sealed class MainForm : Form
         ApplyWindowDarkMode();
     }
 
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        UpdateTabLayout();
+    }
+
     private void ConfigureGrids()
     {
         ConfigureGrid(_secretGrid);
         ConfigureGrid(_clipboardGrid);
 
-        _secretGrid.SelectionChanged += (_, _) => UpdateTotpPreview();
+        _secretGrid.SelectionChanged += (_, _) =>
+        {
+            UpdateTotpPreview();
+            UpdateInsertAvailability();
+        };
 
         _secretGrid.Columns.Add(new DataGridViewTextBoxColumn
         {
@@ -357,6 +436,7 @@ public sealed class MainForm : Form
         var actionMenu = new ToolStripMenuItem("Aktionen");
         actionMenu.DropDownItems.Add("Entsperren", null, (_, _) => UnlockRequested?.Invoke(this, EventArgs.Empty));
         actionMenu.DropDownItems.Add("Sperren", null, (_, _) => LockRequested?.Invoke(this, EventArgs.Empty));
+        actionMenu.DropDownItems.Add("Muster zurücksetzen", null, (_, _) => _unlockPatternCanvas.ResetPattern());
         actionMenu.DropDownItems.Add("Einstellungen speichern", null, (_, _) => SaveSettingsRequested?.Invoke(this, EventArgs.Empty));
 
         var viewMenu = new ToolStripMenuItem("Ansicht");
@@ -387,6 +467,7 @@ public sealed class MainForm : Form
         BuildSecretsPage();
         BuildClipboardPage();
         BuildUnlockPage();
+        BuildDockPage();
     }
 
     private void BuildGeneralPage()
@@ -429,8 +510,6 @@ public sealed class MainForm : Form
         var setPrimaryButton = new Button { Text = "Standard", AutoSize = true };
         var editButton = new Button { Text = "Edit", AutoSize = true };
         var deleteButton = new Button { Text = "X", AutoSize = true };
-        var typeButton = new Button { Text = "Tippen", AutoSize = true };
-
         addButton.Click += (_, _) => AddSecretRequested?.Invoke(this, EventArgs.Empty);
         setPrimaryButton.Click += (_, _) =>
         {
@@ -456,21 +535,11 @@ public sealed class MainForm : Form
                 DeleteSecretRequested?.Invoke(secret);
             }
         };
-        typeButton.Click += (_, _) =>
-        {
-            var secret = GetSelectedSecret();
-            if (secret is not null)
-            {
-                TypeSecretRequested?.Invoke(secret);
-            }
-        };
-
         var buttonPanel = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, BackColor = _backgroundColor };
         buttonPanel.Controls.Add(addButton);
         buttonPanel.Controls.Add(setPrimaryButton);
         buttonPanel.Controls.Add(editButton);
         buttonPanel.Controls.Add(deleteButton);
-        buttonPanel.Controls.Add(typeButton);
 
         var detailsPanel = new FlowLayoutPanel
         {
@@ -482,16 +551,23 @@ public sealed class MainForm : Form
         detailsPanel.Controls.Add(new Label { Text = "Aktueller TOTP:", AutoSize = true });
         detailsPanel.Controls.Add(_totpPreviewLabel);
 
-        var insertPanel = new FlowLayoutPanel
+        var insertPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Bottom,
-            AutoSize = true,
+            AutoSize = false,
+            Height = 86,
+            ColumnCount = 4,
             Padding = new Padding(0, 14, 0, 0),
             BackColor = _backgroundColor
         };
-        insertPanel.Controls.Add(_insertUsernameButton);
-        insertPanel.Controls.Add(_insertSecretButton);
-        insertPanel.Controls.Add(_insertTotpButton);
+        insertPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+        insertPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+        insertPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+        insertPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+        insertPanel.Controls.Add(_insertUsernameButton, 0, 0);
+        insertPanel.Controls.Add(_insertSecretButton, 1, 0);
+        insertPanel.Controls.Add(_insertTotpButton, 2, 0);
+        insertPanel.Controls.Add(_insertSequenceButton, 3, 0);
 
         var panel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12), BackColor = _backgroundColor };
         panel.Controls.Add(_secretGrid);
@@ -532,37 +608,107 @@ public sealed class MainForm : Form
     {
         var panel = new TableLayoutPanel
         {
-            Dock = DockStyle.Top,
-            Padding = new Padding(20),
-            AutoSize = true,
+            Dock = DockStyle.Fill,
+            Padding = new Padding(12, 8, 12, 12),
+            AutoSize = false,
             ColumnCount = 1,
+            RowCount = 4,
             BackColor = _backgroundColor
         };
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        panel.Controls.Add(new Label
-        {
-            Text = "Die App ist gesperrt. Zum Fortfahren bitte entsperren.",
-            AutoSize = true
-        }, 0, 0);
-        panel.Controls.Add(_unlockInfoLabel, 0, 1);
-        panel.Controls.Add(_unlockPinLabel, 0, 2);
-        panel.Controls.Add(_unlockPinTextBox, 0, 3);
-        panel.Controls.Add(_unlockPatternLabel, 0, 4);
-        panel.Controls.Add(_unlockPatternCanvas, 0, 5);
+        _unlockPinTextBox.Dock = DockStyle.Top;
+        _unlockPinTextBox.Margin = new Padding(0, 0, 0, 10);
+        _unlockPatternCanvas.Dock = DockStyle.Fill;
+        _unlockPatternCanvas.Margin = Padding.Empty;
+        _unlockSubmitButton.Dock = DockStyle.Top;
+        _unlockSubmitButton.Height = 48;
+        _unlockSubmitButton.Margin = new Padding(0, 12, 0, 0);
+        _unlockSubmitButton.BackColor = _accentColor;
+        _unlockSubmitButton.ForeColor = Color.FromArgb(14, 20, 28);
+        _unlockSubmitButton.FlatStyle = FlatStyle.Flat;
+        _unlockSubmitButton.FlatAppearance.BorderColor = _accentColor;
+        _unlockSubmitButton.FlatAppearance.BorderSize = 1;
 
-        var buttonPanel = new FlowLayoutPanel { AutoSize = true, BackColor = _backgroundColor };
-        buttonPanel.Controls.Add(_unlockSubmitButton);
-        buttonPanel.Controls.Add(_unlockResetPatternButton);
-        panel.Controls.Add(buttonPanel, 0, 6);
-        panel.Controls.Add(_unlockFeedbackLabel, 0, 7);
+        panel.Controls.Add(_unlockPinTextBox, 0, 0);
+        panel.Controls.Add(_unlockPatternCanvas, 0, 1);
+        panel.Controls.Add(_unlockFeedbackLabel, 0, 2);
+        panel.Controls.Add(_unlockSubmitButton, 0, 3);
 
         _unlockPage.Controls.Clear();
         _unlockPage.BackColor = _backgroundColor;
         _unlockPage.Controls.Add(panel);
     }
 
+    private void BuildDockPage()
+    {
+        var secretActions = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 92,
+            ColumnCount = 2,
+            RowCount = 2,
+            BackColor = _backgroundColor,
+            Padding = new Padding(0, 8, 0, 8)
+        };
+        secretActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+        secretActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+        secretActions.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
+        secretActions.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
+        secretActions.Controls.Add(_dockUsernameButton, 0, 0);
+        secretActions.Controls.Add(_dockSecretButton, 1, 0);
+        secretActions.Controls.Add(_dockTotpButton, 0, 1);
+        secretActions.Controls.Add(_dockTypeButton, 1, 1);
+
+        var clipboardActions = new Panel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 52,
+            BackColor = _backgroundColor,
+            Padding = new Padding(0, 8, 0, 0)
+        };
+        clipboardActions.Controls.Add(_dockClipboardButton);
+        _dockClipboardButton.Dock = DockStyle.Fill;
+
+        var secretSection = new Panel { Dock = DockStyle.Top, Height = 320, BackColor = _backgroundColor };
+        secretSection.Controls.Add(_dockSecretList);
+        secretSection.Controls.Add(secretActions);
+        secretSection.Controls.Add(new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 26,
+            BackColor = _backgroundColor,
+            Controls = { _dockSecretLabel }
+        });
+
+        var clipboardSection = new Panel { Dock = DockStyle.Fill, BackColor = _backgroundColor };
+        clipboardSection.Controls.Add(_dockClipboardList);
+        clipboardSection.Controls.Add(clipboardActions);
+        clipboardSection.Controls.Add(new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 26,
+            BackColor = _backgroundColor,
+            Controls = { _dockClipboardLabel }
+        });
+
+        _dockPage.Controls.Clear();
+        _dockPage.Padding = new Padding(10);
+        _dockPage.BackColor = _backgroundColor;
+        _dockPage.Controls.Add(clipboardSection);
+        _dockPage.Controls.Add(secretSection);
+    }
+
     private void ShowPage(Panel page)
     {
+        if (_isDocked && page != _unlockPage && page != _dockPage)
+        {
+            page = _dockPage;
+        }
+
         if (_isLocked && page != _unlockPage)
         {
             return;
@@ -592,6 +738,8 @@ public sealed class MainForm : Form
         button.FlatAppearance.BorderColor = isActive ? _accentColor : _panelColor;
         button.FlatAppearance.BorderSize = 1;
         button.Font = new Font(Font, isActive ? FontStyle.Bold : FontStyle.Regular);
+        button.TextAlign = ContentAlignment.MiddleCenter;
+        button.Padding = new Padding(0, 0, 0, 1);
     }
 
     private void ApplyDarkTheme(Control root)
@@ -616,12 +764,16 @@ public sealed class MainForm : Form
                     textBox.ForeColor = _textColor;
                     textBox.BorderStyle = BorderStyle.FixedSingle;
                     break;
+                case ListBox listBox:
+                    listBox.BackColor = _surfaceColor;
+                    listBox.ForeColor = _textColor;
+                    break;
                 case NumericUpDown numericUpDown:
                     numericUpDown.BackColor = _surfaceColor;
                     numericUpDown.ForeColor = _textColor;
                     break;
                 case Button button:
-                    if (button != _generalTabButton && button != _secretsTabButton && button != _clipboardTabButton)
+                    if (button != _generalTabButton && button != _secretsTabButton && button != _clipboardTabButton && button != _unlockTabButton)
                     {
                         button.BackColor = _panelColor;
                         button.ForeColor = _textColor;
@@ -661,6 +813,7 @@ public sealed class MainForm : Form
         UpdateTabButtonState(_unlockTabButton, _contentHost.Controls.Contains(_unlockPage));
         ConfigureInsertButtons();
         ConfigureStatusButtons();
+        UpdateTabLayout();
     }
 
     private void ApplyTouchMode(bool enabled)
@@ -670,17 +823,18 @@ public sealed class MainForm : Form
         var rowHeight = enabled ? 44 : 28;
         var font = new Font(Font.FontFamily, enabled ? 11f : 9f, FontStyle.Regular);
         var insertButtonSize = enabled ? new Size(148, 100) : new Size(126, 78);
+        var dockButtonFontSize = enabled ? 10f : 8.5f;
 
-        foreach (var button in new[] { _insertUsernameButton, _insertSecretButton, _insertTotpButton, _generalTabButton, _secretsTabButton, _clipboardTabButton, _unlockTabButton })
+        foreach (var button in new[] { _insertUsernameButton, _insertSecretButton, _insertTotpButton, _insertSequenceButton, _generalTabButton, _secretsTabButton, _clipboardTabButton, _unlockTabButton })
         {
             button.Height = buttonHeight;
             button.Font = new Font(Font.FontFamily, enabled ? 11f : 9f, button.Font.Style);
         }
 
-        foreach (var button in new[] { _insertUsernameButton, _insertSecretButton, _insertTotpButton })
+        foreach (var button in new[] { _insertUsernameButton, _insertSecretButton, _insertTotpButton, _insertSequenceButton })
         {
             button.Size = insertButtonSize;
-            button.Margin = enabled ? new Padding(0, 0, 14, 0) : new Padding(0, 0, 10, 0);
+            button.Margin = Padding.Empty;
         }
 
         foreach (var button in new[] { _generalTabButton, _secretsTabButton, _clipboardTabButton, _unlockTabButton })
@@ -694,12 +848,22 @@ public sealed class MainForm : Form
             };
         }
 
+        _tabsPanel.Height = enabled ? 70 : 62;
+        _tabsPanel.Padding = enabled ? new Padding(12, 10, 12, 16) : new Padding(12, 10, 12, 14);
+
         _aboutButton.Size = enabled ? new Size(42, 42) : new Size(34, 34);
         _aboutButton.Font = new Font(Font.FontFamily, enabled ? 12f : 10f, FontStyle.Bold);
         _unlockButton.Size = enabled ? new Size(48, 40) : new Size(42, 34);
         _lockButton.Size = enabled ? new Size(48, 40) : new Size(42, 34);
         _topMostButton.Size = enabled ? new Size(48, 40) : new Size(42, 34);
+        _dockToggleButton.Size = enabled ? new Size(48, 40) : new Size(42, 34);
         _saveSettingsButton.Size = enabled ? new Size(48, 40) : new Size(42, 34);
+        foreach (var button in new[] { _dockUsernameButton, _dockSecretButton, _dockTotpButton, _dockTypeButton, _dockClipboardButton })
+        {
+            button.Font = new Font(Font.FontFamily, dockButtonFontSize, FontStyle.Bold);
+        }
+        _dockSecretList.Font = font;
+        _dockClipboardList.Font = font;
 
         _secretGrid.RowTemplate.Height = rowHeight;
         _clipboardGrid.RowTemplate.Height = rowHeight;
@@ -723,6 +887,7 @@ public sealed class MainForm : Form
         ConfigureInsertButton(_insertUsernameButton, CreateUserIcon(28, _accentColor), "USERNAME");
         ConfigureInsertButton(_insertSecretButton, CreateLockIcon(28, _accentColor), "SECRET");
         ConfigureInsertButton(_insertTotpButton, CreateTotpIcon(28, _accentColor), "TOTP");
+        ConfigureInsertButton(_insertSequenceButton, CreateArrowIcon(28, _accentColor, right: true), "SEQ");
     }
 
     private void ConfigureStatusButtons()
@@ -733,6 +898,10 @@ public sealed class MainForm : Form
             _topMostButton,
             _topMostCheckBox.Checked ? CreatePinnedIcon(20, _accentColor) : CreatePinIcon(20, _accentColor),
             _topMostCheckBox.Checked ? "Immer im Vordergrund ist aktiv" : "Immer im Vordergrund aktivieren");
+        ConfigureStatusButton(
+            _dockToggleButton,
+            CreateArrowIcon(20, _accentColor, right: !_isDocked),
+            _isDocked ? "Docked-Mode verlassen" : "An rechten Rand anheften");
         ConfigureStatusButton(_saveSettingsButton, CreateSaveIcon(20, _accentColor), "Einstellungen speichern");
     }
 
@@ -767,6 +936,22 @@ public sealed class MainForm : Form
         ShowPage(_unlockPage);
     }
 
+    public void ShowSecretsPage()
+    {
+        if (_isDocked)
+        {
+            ShowDockedPage();
+            return;
+        }
+
+        ShowPage(_secretsPage);
+    }
+
+    private void ShowDockedPage()
+    {
+        ShowPage(_dockPage);
+    }
+
     public string EnteredUnlockPin => _unlockPinTextBox.Text;
 
     public string EnteredUnlockPattern => _unlockPatternCanvas.GetPattern();
@@ -786,16 +971,8 @@ public sealed class MainForm : Form
 
     private void ConfigureUnlockPage()
     {
-        _unlockInfoLabel.Text = _supportsPin && _supportsPattern
-            ? "PIN oder Muster verwenden."
-            : _supportsPattern
-                ? "Bitte das Entsperrmuster zeichnen."
-                : "Bitte die PIN eingeben.";
-        _unlockPinLabel.Visible = _supportsPin;
         _unlockPinTextBox.Visible = _supportsPin;
-        _unlockPatternLabel.Visible = _supportsPattern;
         _unlockPatternCanvas.Visible = _supportsPattern;
-        _unlockResetPatternButton.Visible = _supportsPattern;
     }
 
     private void FocusUnlockInput()
@@ -814,10 +991,166 @@ public sealed class MainForm : Form
 
     private void UpdateTabAvailability()
     {
-        _generalTabButton.Enabled = !_isLocked;
-        _secretsTabButton.Enabled = !_isLocked;
-        _clipboardTabButton.Enabled = !_isLocked;
+        _generalTabButton.Enabled = !_isLocked && !_isDocked;
+        _secretsTabButton.Enabled = !_isLocked && !_isDocked;
+        _clipboardTabButton.Enabled = !_isLocked && !_isDocked;
         _unlockTabButton.Enabled = _isLocked;
+        UpdateTabLayout();
+    }
+
+    private void UpdateTabLayout()
+    {
+        if (_isDocked || _tabsPanel is null)
+        {
+            return;
+        }
+
+        var visibleTabs = new List<Button> { _generalTabButton, _secretsTabButton, _clipboardTabButton };
+        if (_unlockTabButton.Visible)
+        {
+            visibleTabs.Add(_unlockTabButton);
+        }
+
+        if (visibleTabs.Count == 0 || _tabsPanel.Width <= 0)
+        {
+            return;
+        }
+
+        var availableWidth = Math.Max(120, _tabsPanel.ClientSize.Width - _tabsPanel.Padding.Left - _tabsPanel.Padding.Right);
+        var widthPerTab = Math.Max(70, availableWidth / visibleTabs.Count);
+        var height = _touchModeCheckBox.Checked ? 44 : 36;
+
+        foreach (var tab in visibleTabs)
+        {
+            tab.Width = widthPerTab - 2;
+            tab.Height = height;
+            tab.Margin = Padding.Empty;
+        }
+    }
+
+    private void ToggleDockMode()
+    {
+        if (_isDocked)
+        {
+            ExitDockMode();
+        }
+        else
+        {
+            EnterDockMode();
+        }
+    }
+
+    private void EnterDockMode()
+    {
+        if (_isDocked)
+        {
+            return;
+        }
+
+        _normalBounds = Bounds;
+        _restoreTopMostAfterDock = _topMostCheckBox.Checked;
+        _isDocked = true;
+        _topMostCheckBox.Checked = true;
+        TopMost = true;
+        if (MainMenuStrip is not null)
+        {
+            MainMenuStrip.Visible = false;
+        }
+        _tabsPanel.Visible = false;
+
+        var area = Screen.FromControl(this).WorkingArea;
+        var width = Math.Min(172, Math.Max(160, area.Width / 6));
+        Bounds = new Rectangle(area.Right - width, area.Top, width, area.Height);
+        ShowDockedPage();
+        UpdateTabAvailability();
+        ConfigureStatusButtons();
+    }
+
+    private void ExitDockMode()
+    {
+        if (!_isDocked)
+        {
+            return;
+        }
+
+        _isDocked = false;
+        if (MainMenuStrip is not null)
+        {
+            MainMenuStrip.Visible = true;
+        }
+        _tabsPanel.Visible = true;
+        if (_normalBounds.Width > 0 && _normalBounds.Height > 0)
+        {
+            Bounds = _normalBounds;
+        }
+
+        _topMostCheckBox.Checked = _restoreTopMostAfterDock;
+        TopMost = _restoreTopMostAfterDock;
+        if (_isLocked)
+        {
+            ShowUnlockPage();
+        }
+        else
+        {
+            ShowPage(_generalPage);
+        }
+
+        UpdateTabAvailability();
+        ConfigureStatusButtons();
+    }
+
+    private void TriggerDockInsert(SecretFieldKind kind)
+    {
+        var secret = GetSelectedDockSecret();
+        if (secret is not null)
+        {
+            InsertSecretFieldRequested?.Invoke(secret, kind);
+        }
+    }
+
+    private SecretEntry? GetSelectedDockSecret()
+    {
+        return _dockSecretList.SelectedItem as SecretEntry;
+    }
+
+    private ClipboardEntry? GetSelectedDockClipboardEntry()
+    {
+        return _dockClipboardList.SelectedItem as ClipboardEntry;
+    }
+
+    private void RestoreDockSelections(Guid? selectedSecretId, DateTimeOffset? selectedTimestamp)
+    {
+        if (selectedSecretId.HasValue)
+        {
+            for (var i = 0; i < _dockSecretList.Items.Count; i++)
+            {
+                if (_dockSecretList.Items[i] is SecretEntry secret && secret.Id == selectedSecretId.Value)
+                {
+                    _dockSecretList.SelectedIndex = i;
+                    break;
+                }
+            }
+        }
+        else if (_dockSecretList.Items.Count > 0 && _dockSecretList.SelectedIndex < 0)
+        {
+            _dockSecretList.SelectedIndex = 0;
+        }
+
+        if (selectedTimestamp.HasValue)
+        {
+            for (var i = 0; i < _dockClipboardList.Items.Count; i++)
+            {
+                if (_dockClipboardList.Items[i] is ClipboardEntry entry && entry.CapturedAt == selectedTimestamp.Value)
+                {
+                    _dockClipboardList.SelectedIndex = i;
+                    break;
+                }
+            }
+        }
+        else if (_dockClipboardList.Items.Count > 0 && _dockClipboardList.SelectedIndex < 0)
+        {
+            _dockClipboardList.SelectedIndex = 0;
+        }
     }
 
     private void ConfigureInsertButton(Button button, Image image, string text)
@@ -830,6 +1163,7 @@ public sealed class MainForm : Form
         button.ImageAlign = ContentAlignment.MiddleCenter;
         button.TextAlign = ContentAlignment.BottomCenter;
         button.Padding = new Padding(10, 8, 10, 10);
+        button.Dock = DockStyle.Fill;
         button.FlatStyle = FlatStyle.Flat;
         button.FlatAppearance.BorderSize = 1;
         button.FlatAppearance.BorderColor = _accentColor;
@@ -953,6 +1287,33 @@ public sealed class MainForm : Form
         return bitmap;
     }
 
+    private static Bitmap CreateArrowIcon(int size, Color color, bool right)
+    {
+        var bitmap = new Bitmap(size, size);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var pen = new Pen(color, 2.6f)
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round
+        };
+
+        if (right)
+        {
+            graphics.DrawLine(pen, size * 0.22f, size * 0.5f, size * 0.74f, size * 0.5f);
+            graphics.DrawLine(pen, size * 0.5f, size * 0.28f, size * 0.74f, size * 0.5f);
+            graphics.DrawLine(pen, size * 0.5f, size * 0.72f, size * 0.74f, size * 0.5f);
+        }
+        else
+        {
+            graphics.DrawLine(pen, size * 0.26f, size * 0.5f, size * 0.78f, size * 0.5f);
+            graphics.DrawLine(pen, size * 0.5f, size * 0.28f, size * 0.26f, size * 0.5f);
+            graphics.DrawLine(pen, size * 0.5f, size * 0.72f, size * 0.26f, size * 0.5f);
+        }
+
+        return bitmap;
+    }
+
     private static Bitmap CreateTotpIcon(int size, Color color)
     {
         var bitmap = new Bitmap(size, size);
@@ -1057,6 +1418,23 @@ public sealed class MainForm : Form
         {
             InsertSecretFieldRequested?.Invoke(secret, kind);
         }
+    }
+
+    private void UpdateInsertAvailability()
+    {
+        var secret = GetSelectedSecret();
+        UpdateInsertButtonState(_insertUsernameButton, secret is not null && !string.IsNullOrWhiteSpace(secret.Username));
+        UpdateInsertButtonState(_insertSecretButton, secret is not null && !string.IsNullOrWhiteSpace(secret.Value));
+        UpdateInsertButtonState(_insertTotpButton, secret is not null && !string.IsNullOrWhiteSpace(secret.TotpSeed));
+        UpdateInsertButtonState(_insertSequenceButton, secret is not null);
+    }
+
+    private void UpdateInsertButtonState(Button button, bool enabled)
+    {
+        button.Enabled = enabled;
+        button.BackColor = enabled ? _panelColor : Color.FromArgb(72, 78, 86);
+        button.ForeColor = enabled ? _textColor : _mutedTextColor;
+        button.FlatAppearance.BorderColor = enabled ? _accentColor : Color.FromArgb(92, 98, 108);
     }
 
     private void UpdateTotpPreview()

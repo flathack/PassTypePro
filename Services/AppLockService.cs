@@ -5,6 +5,8 @@ namespace PassTypePro.Services;
 
 public sealed class AppLockService
 {
+    public const int MaxFailedAttempts = 10;
+
     private AppConfig _config;
     private DateTimeOffset _lastActivity = DateTimeOffset.UtcNow;
 
@@ -29,6 +31,10 @@ public sealed class AppLockService
     public bool IsUnlocked { get; private set; }
 
     public bool IsLocked => IsEnabled && !IsUnlocked;
+
+    public int FailedAttempts { get; private set; }
+
+    public int RemainingAttempts => Math.Max(0, MaxFailedAttempts - FailedAttempts);
 
     public void ApplyConfig(AppConfig config, bool keepSessionState = true)
     {
@@ -71,7 +77,12 @@ public sealed class AppLockService
         if (success)
         {
             IsUnlocked = true;
+            FailedAttempts = 0;
             Touch();
+        }
+        else
+        {
+            FailedAttempts++;
         }
 
         return success;
@@ -97,7 +108,12 @@ public sealed class AppLockService
         if (success)
         {
             IsUnlocked = true;
+            FailedAttempts = 0;
             Touch();
+        }
+        else
+        {
+            FailedAttempts++;
         }
 
         return success;
@@ -138,5 +154,10 @@ public sealed class AppLockService
 
         config.UnlockPatternSalt = Convert.ToBase64String(salt);
         config.UnlockPatternHash = Convert.ToBase64String(hash);
+    }
+
+    public void ResetFailedAttempts()
+    {
+        FailedAttempts = 0;
     }
 }

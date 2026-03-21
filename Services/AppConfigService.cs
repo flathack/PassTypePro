@@ -36,4 +36,12 @@ public sealed class AppConfigService
         var json = JsonSerializer.Serialize(config, JsonOptions);
         File.WriteAllText(_configFilePath, json);
     }
+
+    public void Reset()
+    {
+        if (File.Exists(_configFilePath))
+        {
+            File.Delete(_configFilePath);
+        }
+    }
 }

@@ -48,7 +48,19 @@ public sealed class TrayApplicationContext : ApplicationContext
         _config = _configService.Load();
         _config.AutoStartEnabled = _autoStartService.IsEnabled();
         _appLockService = new AppLockService(_config);
-        _secrets = _secretStore.Load().ToList();
+        try
+        {
+            _secrets = _secretStore.Load().ToList();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _secrets = [];
+            MessageBox.Show(
+                ex.Message,
+                "Secret-Datei beschÃ¤digt",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
         _clipboardHistoryService = new ClipboardHistoryService(_config.ClipboardHistoryLimit);
 
         _hiddenWindow = new HiddenHotkeyWindow();
@@ -730,15 +742,43 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         if (!success)
         {
-            _unlockFeedback = "Entsperren fehlgeschlagen. Bitte Daten prüfen.";
+            if (_appLockService.FailedAttempts >= AppLockService.MaxFailedAttempts)
+            {
+                ResetApplicationAfterTooManyFailures();
+                return;
+            }
+
+            _unlockFeedback = $"Entsperren fehlgeschlagen. Noch {_appLockService.RemainingAttempts} Versuche.";
             RefreshMainForm();
             _mainForm.ShowUnlockPage();
             return;
         }
 
         _unlockFeedback = null;
+        _appLockService.ResetFailedAttempts();
         _mainForm.ClearUnlockInput();
         RefreshUi();
+        _mainForm.ShowSecretsPage();
+    }
+
+    private void ResetApplicationAfterTooManyFailures()
+    {
+        _clipboardTimer.Stop();
+        _clipboardHistoryService.Clear();
+        _secrets.Clear();
+        _appLockService.ResetFailedAttempts();
+        _configService.Reset();
+        _secretStore.Reset();
+        _autoStartService.SetEnabled(false, Application.ExecutablePath);
+
+        MessageBox.Show(
+            _mainForm,
+            "Nach 10 Fehlversuchen wurde PassTypePro aus Sicherheitsgründen zurückgesetzt und wird jetzt beendet.",
+            "Sicherheitsreset",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Warning);
+
+        ExitThread();
     }
 
     private static string Shorten(string value)

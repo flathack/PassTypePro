@@ -30,9 +30,12 @@ public sealed class SecureSecretStore
 
             return JsonSerializer.Deserialize<List<SecretEntry>>(json) ?? [];
         }
-        catch
+        catch (Exception ex)
         {
-            return [];
+            var backupPath = BackupCorruptFile();
+            throw new InvalidOperationException(
+                $"Die Secret-Datei konnte nicht geladen werden. Eine Sicherung wurde erstellt: {backupPath}",
+                ex);
         }
     }
 
@@ -42,5 +45,20 @@ public sealed class SecureSecretStore
         var bytes = Encoding.UTF8.GetBytes(json);
         var protectedBytes = ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser);
         File.WriteAllBytes(_filePath, protectedBytes);
+    }
+
+    public void Reset()
+    {
+        if (File.Exists(_filePath))
+        {
+            File.Delete(_filePath);
+        }
+    }
+
+    private string BackupCorruptFile()
+    {
+        var backupPath = _filePath + $".corrupt-{DateTime.Now:yyyyMMdd-HHmmss}.bak";
+        File.Copy(_filePath, backupPath, overwrite: true);
+        return backupPath;
     }
 }

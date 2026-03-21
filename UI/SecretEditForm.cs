@@ -142,13 +142,6 @@ public sealed class SecretEditForm : Form
     {
         if (DialogResult == DialogResult.OK)
         {
-            if (string.IsNullOrWhiteSpace(_nameTextBox.Text) || string.IsNullOrEmpty(_valueTextBox.Text))
-            {
-                MessageBox.Show(this, "Name und Secret sind erforderlich.", "Validierung", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                e.Cancel = true;
-                return;
-            }
-
             if (!string.IsNullOrWhiteSpace(_totpSeedTextBox.Text) && !_totpService.CanGenerate(_totpSeedTextBox.Text))
             {
                 MessageBox.Show(this, "Der TOTP-Seed ist ungueltig.", "Validierung", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -165,7 +158,7 @@ public sealed class SecretEditForm : Form
             }
 
             Secret = Secret ?? new SecretEntry();
-            Secret.Name = _nameTextBox.Text.Trim();
+            Secret.Name = BuildEntryName();
             Secret.Username = _usernameTextBox.Text.Trim();
             Secret.Value = _valueTextBox.Text;
             Secret.TotpSeed = _totpSeedTextBox.Text.Trim();
@@ -173,12 +166,58 @@ public sealed class SecretEditForm : Form
             Secret.StartDelayMs = Decimal.ToInt32(_startDelayNumeric.Value);
             Secret.KeystrokeDelayMs = Decimal.ToInt32(_keystrokeDelayNumeric.Value);
             Secret.SequenceTemplate = string.IsNullOrWhiteSpace(_sequenceTextBox.Text)
-                ? "{SECRET}"
+                ? BuildDefaultSequence()
                 : _sequenceTextBox.Text.Trim();
             Secret.IsPrimary = _primaryCheckBox.Checked;
         }
 
         base.OnFormClosing(e);
+    }
+
+    private string BuildEntryName()
+    {
+        var name = _nameTextBox.Text.Trim();
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            return name;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_usernameTextBox.Text))
+        {
+            return _usernameTextBox.Text.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(_totpSeedTextBox.Text))
+        {
+            return "TOTP-Eintrag";
+        }
+
+        if (!string.IsNullOrWhiteSpace(_valueTextBox.Text))
+        {
+            return "Secret-Eintrag";
+        }
+
+        return "Neuer Eintrag";
+    }
+
+    private string BuildDefaultSequence()
+    {
+        if (!string.IsNullOrWhiteSpace(_valueTextBox.Text))
+        {
+            return "{SECRET}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(_totpSeedTextBox.Text))
+        {
+            return "{TOTP}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(_usernameTextBox.Text))
+        {
+            return "{USERNAME}";
+        }
+
+        return "{SECRET}";
     }
 
     private FlowLayoutPanel BuildTokenPanel()
